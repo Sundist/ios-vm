@@ -46,7 +46,8 @@ final class QEMUArgumentTests: XCTestCase {
         XCTAssertTrue(devices.contains("ramfb"))
         XCTAssertTrue(devices.contains("usb-tablet,bus=xhci.0"))
         XCTAssertTrue(devices.contains { $0.hasPrefix("nvme,drive=hd0") })
-        XCTAssertTrue(devices.contains { $0.hasPrefix("usb-storage,id=cddev,drive=cd0") })
+        XCTAssertTrue(devices.contains("usb-bot,id=cdbot,bus=xhci.0"))
+        XCTAssertTrue(devices.contains { $0.hasPrefix("scsi-cd,bus=cdbot.0,drive=cd0,id=cddev") })
         XCTAssertTrue(devices.contains { $0.hasPrefix("usb-storage,drive=ans0") }, "answer disk attached")
         let drives = value(after: "-drive", in: args)
         XCTAssertTrue(drives.contains { $0.contains("edk2-aarch64-code.fd") && $0.contains("readonly=on") })
@@ -70,7 +71,8 @@ final class QEMUArgumentTests: XCTestCase {
         config.bypassWindowsRequirements = false
         try store.createHardDisk(sizeGB: 1, into: &config)
         let plan = try store.makeQEMULaunchPlan(for: &config, resourceDirectory: resources,
-                                                socketDirectory: root.appendingPathComponent("s"), splitWX: true)
+                                                socketDirectory: root.appendingPathComponent("s"), splitWX: true,
+                                                relativeSocketPaths: true)
         let args = plan.arguments
         XCTAssertEqual(plan.libraryName, "qemu-x86_64-softmmu")
         XCTAssertEqual(value(after: "-machine", in: args), ["q35,vmport=off"])
@@ -80,6 +82,10 @@ final class QEMUArgumentTests: XCTestCase {
         XCTAssertTrue(devices.contains("e1000e,netdev=net0"))
         XCTAssertTrue(devices.contains { $0.hasPrefix("ide-cd,id=cddev") })
         XCTAssertFalse(devices.contains { $0.contains("ans0") })
+        // Relative socket names keep long container paths under the 104-byte limit.
+        XCTAssertEqual(value(after: "-vnc", in: args), ["unix:\(plan.vncSocket.lastPathComponent)"])
+        XCTAssertTrue(value(after: "-qmp", in: args)[0].hasPrefix("unix:\(plan.qmpSocket.lastPathComponent),"))
+        XCTAssertEqual(plan.socketDirectory, root.appendingPathComponent("s"))
     }
 
     func testMissingFirmwareIsReported() throws {

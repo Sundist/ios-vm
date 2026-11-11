@@ -119,7 +119,8 @@ final class QEMUHostIntegrationTests: XCTestCase, RFBClientDelegate {
         // CD change through QMP uses the device id the app relies on.
         let eject = expectation(description: "eject")
         qmp.execute("eject", arguments: ["id": "cddev", "force": true]) { result in
-            if case .success = result { eject.fulfill() }
+            if case let .failure(error) = result { XCTFail("eject failed: \(error)") }
+            eject.fulfill()
         }
         wait(for: [eject], timeout: 30)
 

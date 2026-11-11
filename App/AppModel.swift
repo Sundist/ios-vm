@@ -278,7 +278,8 @@ final class AppModel {
                 for: &config,
                 resourceDirectory: runtime.resourceDirectory,
                 socketDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("q", isDirectory: true),
-                splitWX: runtime.flavor == .jit)
+                splitWX: runtime.flavor == .jit,
+                relativeSocketPaths: true)
             let session = QEMUSession(id: id)
             do {
                 try session.start(plan: plan)

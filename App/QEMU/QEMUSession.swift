@@ -199,7 +199,10 @@ final class QEMUSession: Identifiable {
     private func waitForSocket(_ url: URL) async -> UnixSocket? {
         for _ in 0..<600 {   // up to 60 s
             if !state.isActive { return nil }
-            if FileManager.default.fileExists(atPath: url.path), let socket = try? UnixSocket.connect(path: url.path) {
+            // Connect by file name: QEMURuntime made the socket directory the
+            // working directory, which keeps the path under 104 bytes.
+            if FileManager.default.fileExists(atPath: url.path),
+               let socket = try? UnixSocket.connect(path: url.lastPathComponent) {
                 return socket
             }
             try? await Task.sleep(nanoseconds: 100_000_000)

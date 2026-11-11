@@ -85,7 +85,8 @@ final class EngineSmokeTests: XCTestCase {
         let plan = try store.makeQEMULaunchPlan(
             for: &config,
             resourceDirectory: runtime.resourceDirectory,
-            socketDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("q", isDirectory: true))
+            socketDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("q", isDirectory: true),
+            relativeSocketPaths: true)
         let session = QEMUSession(id: config.id)
         try session.start(plan: plan)
 

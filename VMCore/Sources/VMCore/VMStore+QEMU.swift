@@ -25,7 +25,8 @@ extension VMStore {
         for config: inout VMConfiguration,
         resourceDirectory: URL,
         socketDirectory: URL,
-        splitWX: Bool = false
+        splitWX: Bool = false,
+        relativeSocketPaths: Bool = false
     ) throws -> QEMULaunchPlan {
         guard config.platform == .qemu else { throw VMError.invalidImage("not a QEMU machine") }
         if let problem = config.startProblem { throw VMError.invalidImage(problem) }
@@ -87,6 +88,7 @@ extension VMStore {
             config: config, resourceDirectory: resourceDirectory, hardDisk: hardDisk, cdrom: cdrom,
             answerDisk: answerDisk, efiVariables: vars, vncSocket: vnc, qmpSocket: qmp)
         builder.splitWX = splitWX
+        builder.relativeSocketPaths = relativeSocketPaths
         builder.translationBlockCacheMB = config.memoryMB >= 4096 ? 256 : 128
 
         return QEMULaunchPlan(
@@ -95,6 +97,7 @@ extension VMStore {
             arguments: builder.build(),
             vncSocket: vnc,
             qmpSocket: qmp,
+            socketDirectory: socketDirectory,
             accessedURLs: accessed)
     }
 }

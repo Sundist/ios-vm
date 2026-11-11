@@ -8,6 +8,9 @@ public struct QEMULaunchPlan: Sendable {
     public var arguments: [String]
     public var vncSocket: URL
     public var qmpSocket: URL
+    /// QEMU's working directory. Socket arguments are relative to it so they
+    /// stay under the 104-byte Unix socket path limit in long app containers.
+    public var socketDirectory: URL
     /// Security-scoped files (ISO) that must stay accessible while running.
     public var accessedURLs: [URL]
 }
@@ -34,6 +37,9 @@ public struct QEMUArgumentBuilder {
     public var translationBlockCacheMB = 256
     /// Use mirrored RW/RX mappings (JIT enabled by a debugger, no entitlement).
     public var splitWX = false
+    /// Pass socket file names only (QEMU runs with the socket directory as
+    /// its working directory). Off for tests that run QEMU as a process.
+    public var relativeSocketPaths = false
 
     public init(config: VMConfiguration, resourceDirectory: URL, hardDisk: URL?, cdrom: URL?, answerDisk: URL?,
                 efiVariables: URL, vncSocket: URL, qmpSocket: URL) {
@@ -113,12 +119,17 @@ public struct QEMUArgumentBuilder {
                 "-device", "nvme,drive=hd0,serial=POCKETVM0,bootindex=1",
             ]
         }
-        // The CD drive always exists so an image can be inserted later.
+        // The CD drive always exists so an image can be inserted later. On
+        // ARM64 it is a SCSI CD behind a USB mass-storage (BOT) controller,
+        // so `cddev` names the CD device itself (eject / change medium).
         let cdFile = cdrom.map { ",file=\(Self.escape($0.path))" } ?? ""
         args += ["-drive", "if=none,id=cd0,media=cdrom,readonly=on\(cdFile)"]
         switch arch {
         case .aarch64:
-            args += ["-device", "usb-storage,id=cddev,drive=cd0,removable=on,bus=xhci.0,bootindex=0"]
+            args += [
+                "-device", "usb-bot,id=cdbot,bus=xhci.0",
+                "-device", "scsi-cd,bus=cdbot.0,drive=cd0,id=cddev,bootindex=0",
+            ]
         case .x86_64:
             args += ["-device", "ide-cd,id=cddev,drive=cd0,bus=ide.1,bootindex=0"]
         }
@@ -134,9 +145,11 @@ public struct QEMUArgumentBuilder {
         args += ["-device", arch == .aarch64 ? "virtio-net-pci,netdev=net0" : "e1000e,netdev=net0"]
 
         // Control channels used by the app.
+        let vnc = relativeSocketPaths ? vncSocket.lastPathComponent : vncSocket.path
+        let qmp = relativeSocketPaths ? qmpSocket.lastPathComponent : qmpSocket.path
         args += [
-            "-vnc", "unix:\(vncSocket.path)",
-            "-qmp", "unix:\(qmpSocket.path),server=on,wait=off",
+            "-vnc", "unix:\(vnc)",
+            "-qmp", "unix:\(qmp),server=on,wait=off",
         ]
         return args
     }

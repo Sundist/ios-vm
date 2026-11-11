@@ -61,6 +61,10 @@ final class QEMURuntime: @unchecked Sendable {
             throw VMError.invalidImage(problem)
         }
         setenv("TMPDIR", FileManager.default.temporaryDirectory.path, 1)
+        // QEMU's socket arguments are relative to this directory (path limit).
+        guard FileManager.default.changeCurrentDirectoryPath(plan.socketDirectory.path) else {
+            throw VMError.invalidImage("could not use \(plan.socketDirectory.path) for QEMU's sockets")
+        }
 
         let box = Unmanaged.passRetained(ExitBox(handler: { [weak self] status in
             self?.markFinished()

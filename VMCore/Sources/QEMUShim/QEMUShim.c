@@ -38,9 +38,19 @@ static void pvm_exit_hook(void) {
     }
 }
 
+// After QEMU has shut down, the exit handlers it registered during
+// qemu_init() can deadlock when the app process exits. atexit handlers run in
+// reverse order, so registering this one last makes it run first: it flushes
+// stdio and ends the process without running QEMU's handlers.
+static void pvm_fast_exit(void) {
+    fflush(NULL);
+    _exit(0);
+}
+
 static void pvm_qemu_finished(void *arg) {
     pvm_qemu_run *run = arg;
     qemu_thread_valid = 0;
+    atexit(pvm_fast_exit);
     if (run->done) {
         run->done(run->status, run->context);
     }

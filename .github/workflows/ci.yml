@@ -45,6 +45,7 @@ jobs:
     # Starts real QEMU with the command lines the app generates and drives it
     # through the app's QMP and VNC clients.
     runs-on: macos-15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Install QEMU
@@ -59,6 +60,7 @@ jobs:
     # Runs the app in the iOS Simulator: v86 PC engine end to end, and the
     # in-process QEMU engine with UTM's simulator sysroot embedded.
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - name: Fetch QEMU simulator sysroot from UTM
@@ -88,6 +90,8 @@ jobs:
             -project PocketVM.xcodeproj \
             -scheme PocketVM \
             -destination "id=${{ steps.sim.outputs.udid }}" \
+            -test-timeouts-enabled YES \
+            -maximum-test-execution-time-allowance 900 \
             -resultBundlePath build/EngineTests.xcresult
       - name: Upload test results
         if: always()

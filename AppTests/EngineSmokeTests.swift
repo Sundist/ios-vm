@@ -109,6 +109,20 @@ final class EngineSmokeTests: XCTestCase {
         XCTAssertEqual(session.state, .running)
         XCTAssertGreaterThan(session.screenSize.width, 0)
 
+        // The guest CPU really executes: its program counter moves.
+        func programCounter() async -> String? {
+            guard let registers = await session.monitor("info registers") else { return nil }
+            guard let range = registers.range(of: #"PC=[0-9a-fA-F]+"#, options: .regularExpression) else { return nil }
+            return String(registers[range])
+        }
+        var counters = Set<String>()
+        for _ in 0..<10 {
+            if let pc = await programCounter() { counters.insert(pc) }
+            if counters.count > 1 { break }
+            try await Task.sleep(nanoseconds: 1_000_000_000)
+        }
+        XCTAssertGreaterThan(counters.count, 1, "the guest program counter did not change: \(counters)")
+
         session.pause()
         try await Task.sleep(nanoseconds: 2_000_000_000)
         XCTAssertEqual(session.state, .paused, "QMP stop was not acknowledged with a STOP event")

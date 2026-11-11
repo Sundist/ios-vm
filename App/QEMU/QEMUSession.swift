@@ -167,6 +167,20 @@ final class QEMUSession: Identifiable {
         }
     }
 
+    /// Runs a human monitor command (e.g. "info registers") through QMP.
+    func monitor(_ command: String) async -> String? {
+        guard let qmp else { return nil }
+        return await withCheckedContinuation { continuation in
+            qmp.execute("human-monitor-command", arguments: ["command-line": command]) { result in
+                if case let .success(value) = result {
+                    continuation.resume(returning: value as? String)
+                } else {
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
     // MARK: Channels
 
     private func connectChannels(_ plan: QEMULaunchPlan) async {

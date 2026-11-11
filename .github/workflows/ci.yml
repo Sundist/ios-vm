@@ -1,8 +1,12 @@
 name: CI
 
 on:
+  # main only: the working branch is fast-forwarded into main, so building
+  # both would run every job twice for the same commit.
   push:
+    branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   pc-web:

@@ -54,7 +54,6 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public var isWindows11: Bool { self == .windows11ARM || self == .windows11x64 }
-    }
 
     public var displayName: String {
         switch self {

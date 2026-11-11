@@ -112,6 +112,18 @@ const tests = {
         assert.strictEqual(h.file[0], 2);
     },
 
+    async "get_from_cache is synchronous and only serves cached data"() {
+        const h = harness(2 * CHUNK);
+        assert.strictEqual(h.disk.get_from_cache(0, 512), undefined);
+        await new Promise(resolve => h.disk.get_and_cache(0, 512, resolve));
+        const mbr = h.disk.get_from_cache(0, 512);
+        assert.strictEqual(mbr.length, 512);
+        assert.strictEqual(mbr[511], 511 & 0xff);
+        assert.strictEqual(h.disk.get_from_cache(CHUNK - 256, 512), undefined, "second chunk not cached");
+        await set(h.disk, 256, new Uint8Array(256).fill(0xee));
+        assert.strictEqual(h.disk.get_from_cache(256, 256)[0], 0xee, "cached data includes writes");
+    },
+
     async "read-only disks ignore writes"() {
         const h = harness(CHUNK);
         h.disk.writable = false;

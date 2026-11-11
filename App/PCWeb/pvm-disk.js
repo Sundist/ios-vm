@@ -176,6 +176,28 @@ NativeDisk.prototype.get = function(offset, len, fn) {
         });
 };
 
+/**
+ * Synchronous read used by v86 (e.g. the IDE reads the MBR for the disk
+ * geometry right after `get_and_cache(0, 512)`). Returns undefined when the
+ * data is not cached.
+ */
+NativeDisk.prototype.get_from_cache = function(offset, len) {
+    const first = Math.floor(offset / CHUNK);
+    const last = Math.floor((offset + len - 1) / CHUNK);
+    for(let i = first; i <= last; i++) {
+        if(!this.chunks.has(i)) return undefined;
+    }
+    const out = new Uint8Array(len);
+    for(let i = first; i <= last; i++) {
+        const chunk = this.chunks.get(i);
+        const chunkStart = i * CHUNK;
+        const from = Math.max(offset, chunkStart);
+        const to = Math.min(offset + len, chunkStart + chunk.length);
+        out.set(chunk.subarray(from - chunkStart, to - chunkStart), from - offset);
+    }
+    return out;
+};
+
 NativeDisk.prototype.get_and_cache = function(offset, len, fn) {
     this.get(offset, len, fn);
 };

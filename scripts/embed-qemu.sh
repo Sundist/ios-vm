@@ -5,9 +5,13 @@
 set -euo pipefail
 
 FLAVOR="${PVM_QEMU_FLAVOR:-tci}"
-SRC="$SRCROOT/QEMU/$FLAVOR"
-if [ "${PLATFORM_NAME:-}" != "iphoneos" ] || [ ! -d "$SRC/Frameworks" ]; then
-    echo "QEMU engine not embedded (platform ${PLATFORM_NAME:-?}, $SRC missing or not a device build)"
+case "${PLATFORM_NAME:-}" in
+    iphoneos) SRC="$SRCROOT/QEMU/$FLAVOR" ;;
+    iphonesimulator) SRC="$SRCROOT/QEMU/$FLAVOR-simulator" ;;
+    *) echo "QEMU engine not embedded (platform ${PLATFORM_NAME:-?})"; exit 0 ;;
+esac
+if [ ! -d "$SRC/Frameworks" ]; then
+    echo "QEMU engine not embedded ($SRC missing; see scripts/fetch-qemu-sysroot.sh)"
     exit 0
 fi
 

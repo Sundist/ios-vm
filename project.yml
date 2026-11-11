@@ -100,12 +100,30 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: PocketVM
         SKIP_INSTALL: YES
 
+  PocketVMTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AppTests
+    dependencies:
+      # VMCore comes from the host app (linking it again would duplicate its types).
+      - target: PocketVM
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).tests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/PocketVM.app/PocketVM"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
 schemes:
   PocketVM:
     build:
       targets:
         PocketVM: all
         PocketVMWidget: all
+    test:
+      targets:
+        - PocketVMTests
     run:
       config: Debug
     archive:

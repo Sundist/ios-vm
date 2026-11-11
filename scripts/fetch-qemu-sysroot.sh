@@ -11,19 +11,29 @@
 #   tci  Sysroot-ios-tci-arm64  threaded interpreter, works without JIT (default)
 #   jit  Sysroot-ios-arm64      TCG JIT, needs JIT enabled by a debugger
 #
+# Pass "simulator" as the second argument to get the Apple Silicon iOS
+# Simulator build instead (QEMU/<flavor>-simulator), used by the tests.
+#
 # Requires: macOS, gh (GitHub CLI, logged in or GH_TOKEN set), unzip.
-# Usage: scripts/fetch-qemu-sysroot.sh [tci|jit]
+# Usage: scripts/fetch-qemu-sysroot.sh [tci|jit] [device|simulator]
 set -euo pipefail
 
 FLAVOR="${1:-tci}"
-case "$FLAVOR" in
-    tci) ARTIFACT="Sysroot-ios-tci-arm64" ;;
-    jit) ARTIFACT="Sysroot-ios-arm64" ;;
-    *) echo "usage: $0 [tci|jit]" >&2; exit 2 ;;
+TARGET="${2:-device}"
+case "$FLAVOR-$TARGET" in
+    tci-device) ARTIFACT="Sysroot-ios-tci-arm64" ;;
+    jit-device) ARTIFACT="Sysroot-ios-arm64" ;;
+    tci-simulator) ARTIFACT="Sysroot-ios_simulator-tci-arm64" ;;
+    jit-simulator) ARTIFACT="Sysroot-ios_simulator-arm64" ;;
+    *) echo "usage: $0 [tci|jit] [device|simulator]" >&2; exit 2 ;;
 esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-OUT="$ROOT/QEMU/$FLAVOR"
+if [ "$TARGET" = "simulator" ]; then
+    OUT="$ROOT/QEMU/$FLAVOR-simulator"
+else
+    OUT="$ROOT/QEMU/$FLAVOR"
+fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

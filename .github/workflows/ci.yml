@@ -40,3 +40,59 @@ jobs:
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+  qemu-host:
+    # Starts real QEMU with the command lines the app generates and drives it
+    # through the app's QMP and VNC clients.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install QEMU
+        run: brew install qemu
+      - name: QEMU integration tests
+        env:
+          PVM_QEMU_BIN_DIR: /opt/homebrew/bin
+          PVM_QEMU_SHARE: /opt/homebrew/share/qemu
+        run: swift test --package-path VMCore --filter QEMUHostIntegrationTests
+
+  simulator-e2e:
+    # Runs the app in the iOS Simulator: v86 PC engine end to end, and the
+    # in-process QEMU engine with UTM's simulator sysroot embedded.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch QEMU simulator sysroot from UTM
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-qemu-sysroot.sh tci simulator
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          devices = json.load(sys.stdin)["devices"]
+          for runtime, items in sorted(devices.items(), reverse=True):
+              if "iOS" in runtime:
+                  for d in items:
+                      if d["name"].startswith("iPhone"):
+                          print(d["udid"]); sys.exit(0)
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+      - name: Run app-hosted engine tests
+        run: |
+          xcodebuild test \
+            -project PocketVM.xcodeproj \
+            -scheme PocketVM \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -resultBundlePath build/EngineTests.xcresult
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: EngineTests-xcresult
+          path: build/EngineTests.xcresult
+          retention-days: 14

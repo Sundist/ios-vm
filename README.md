@@ -1,194 +1,205 @@
-# PocketVM — iPhone için sanal makine yöneticisi
+# PocketVM — a virtual machine manager for iPhone
 
-PocketVM, VirtualBox tarzı bir sanal makine uygulamasıdır ve iPhone / iPad üzerinde çalışır.
-Sanal makine oluşturabilir, ayarlarını düzenleyebilir, makineyi başlatıp duraklatabilir,
-sıfırlayabilir ve kapatabilirsiniz. Makinenin durumunu **snapshot** olarak kaydedip daha sonra
-geri yükleyebilir, misafir sistemi de tam ekran seri konsoldan kullanabilirsiniz.
+PocketVM is a VirtualBox-style virtual machine app for iPhone and iPad. You can create
+machines, edit their settings, start, pause, reset and power them off, save their state and
+restore it later, and use the guest full screen with touch, the on-screen keyboard or a
+hardware keyboard.
 
-> **Neden VirtualBox'ın kendisi değil?** iOS, App Store uygulamalarının Hypervisor.framework
-> kullanmasına ve JIT (çalışma anında kod üretme) yapmasına izin vermez. Bu yüzden
-> VirtualBox'taki gibi donanım destekli sanallaştırma iPhone'da mümkün değildir. PocketVM,
-> UTM SE'nin kullandığı yolu izler: misafir CPU'yu **yorumlayıcı (interpreter)** ile
-> emüle eder. Bu yöntem iOS kurallarına uyar ve jailbreak gerektirmez.
+> **Why not VirtualBox itself?** iOS does not let App Store apps use Hypervisor.framework or
+> generate code at run time (JIT). Hardware-assisted virtualization like VirtualBox's is
+> therefore impossible on an iPhone. PocketVM takes the same route as UTM SE: it **emulates**
+> the guest CPU. This follows the iOS rules and needs no jailbreak.
 
-## Özellikler
+## Engines
 
-- **VM Yöneticisi**: makine listesi, ayrıntı paneli (Genel, Sistem, Depolama, Seri Port,
-  Snapshot'lar, Açıklama), oluşturma sihirbazı, ayarlar, klonlama ve silme.
-- **Emüle edilen donanım** (`mini-rv32ima` ile uyumlu bellek haritası):
-  - RV32IMA + Zicsr CPU (machine mode, tek çekirdek)
+| Engine | Guests | How it runs |
+|--------|--------|-------------|
+| **RISC-V** (built-in) | PocketVM Monitor, 32-bit RISC-V no-MMU Linux | Swift interpreter |
+| **PC** ([v86](https://github.com/copy/v86)) | 32-bit x86: Windows 95–XP, Vista/7 32-bit, Linux, DOS | x86 → WebAssembly JIT inside WebKit |
+| **QEMU** ([UTM's fork](https://github.com/utmapp/qemu)) | Windows 11 ARM64 / x64, 64-bit Linux | QEMU as a framework, on a thread in the app |
+
+## Features
+
+- **VM manager:** machine list, details pane (General, System, Storage, Serial Port,
+  Snapshots / Saved State, Description), creation wizard, settings, clone and delete.
+- **Storage:** ISO images are used in place (Files, iCloud, On My iPhone) without copying;
+  blank sparse hard disks or existing raw `.img` files; floppy images for the PC engine.
+- **Home Screen:** every machine can be started like an app, through a Shortcuts icon, a
+  widget or Siri (see below).
+- Machines live in `Documents/Machines/` and are visible in the Files app.
+
+### RISC-V engine
+
+- RV32IMA + Zicsr CPU (machine mode, one hart) with a memory map compatible with
+  `mini-rv32ima`:
   - 1–512 MB RAM (`0x8000_0000`)
-  - NS16550A UART seri konsol (`0x1000_0000`)
-  - CLINT zamanlayıcısı, 1 MHz (`0x1100_0000`)
-  - syscon ile kapatma ve yeniden başlatma (`0x1110_0000`)
-  - Linux için otomatik üretilen device tree (DTB) ve önyükleme argümanları
-- **Misafir sistemler**:
-  - **PocketVM Monitor**: uygulamaya gömülü küçük bir firmware. Hiçbir dosya gerektirmez.
-    Yazdığınızı ekrana geri yazar, Ctrl‑D ile makineyi kapatır.
-  - **Linux (RISC‑V 32‑bit, no‑MMU)**: `mini-rv32ima` için derlenmiş, initramfs içeren bir
-    `Image` çekirdek dosyasıyla Linux açılır.
-- **Konsol**: VT100 kaçış dizilerini destekler (silme, imleç, renk kodlarını yok sayma).
-  Hem yazılım hem donanım klavyesiyle doğrudan tuş girişi yapılır. Esc, Tab, Ctrl, ok tuşları
-  için bir tuş çubuğu vardır. Kopyalama, yapıştırma ve yazı boyutu ayarı da desteklenir.
-- **Snapshot'lar**: CPU, cihaz durumu ve RAM'in tamamı kaydedilir. "Restore" ile makine
-  kaydedildiği yerden devam eder.
-- Boştaki misafir `WFI` komutunu çalıştırır ve motor bu sırada uyur. Böylece işlemci ve pil
-  boşa harcanmaz.
-- Makineler `Documents/Machines/` altında tutulur ve Dosyalar (Files) uygulamasından
-  görülebilir.
+  - NS16550A UART serial console (`0x1000_0000`)
+  - CLINT timer, 1 MHz (`0x1100_0000`)
+  - syscon power off / reboot (`0x1110_0000`)
+  - a generated device tree (DTB) and boot arguments for Linux
+- **PocketVM Monitor:** a small built-in firmware that needs no files. It echoes what you
+  type; Ctrl-D powers the machine off.
+- **Linux (RISC-V 32-bit, no-MMU):** boots an `Image` kernel with a built-in initramfs, such as
+  the images built for `mini-rv32ima`.
+- **Console:** handles VT100 escape sequences (erase, cursor movement; colours are ignored).
+  Keys go straight to the guest from the software or a hardware keyboard, and a key bar
+  provides Esc, Tab, Ctrl and the arrow keys. Copy, paste and font size are supported.
+- **Snapshots:** the whole CPU, device and RAM state; *Restore* continues where it was saved.
+- An idle guest executes `WFI` and the engine sleeps, so it does not waste CPU or battery.
 
-## Windows ve ISO çalıştırma (x86 PC)
+### PC engine (Windows and ISOs, 32-bit x86)
 
-PC makineleri, açık kaynak x86 emülatörü [v86](https://github.com/copy/v86) ile çalışır
-(BSD-2, sürüm 0.5.471, `App/PCWeb` içinde). v86, x86 kodunu WebAssembly'ye çevirir. iOS'ta
-JIT yalnızca WebKit'e izinli olduğu için v86 bir `WKWebView` içinde çalışır ve yorumlayıcıdan
-çok daha hızlıdır.
+PC machines run on the open-source x86 emulator [v86](https://github.com/copy/v86) (BSD-2,
+version 0.5.471, in `App/PCWeb`). v86 translates x86 code to WebAssembly. On iOS only WebKit
+may JIT-compile code, so v86 runs inside a `WKWebView`, which is far faster than an
+interpreter.
 
-- **Desteklenenler:** 32-bit x86 sistemler. Windows 95/98/ME, Windows 2000/XP,
-  Windows Vista/7 32-bit (deneysel ve çok yavaş), 32-bit Linux ISO'ları, FreeDOS, KolibriOS,
-  ReactOS…
-- **Desteklenmeyenler:** 64-bit sistemler. **Windows 10/11 64-bit çalışmaz.**
-- **CD/DVD:** ISO dosyası olduğu yerden (Dosyalar, iCloud, iPhone'umda) okunur, kopyalanmaz.
-- **Sabit disk:** boş disk oluşturulabilir veya mevcut bir raw `.img` eklenebilir. Misafirin
-  diske yazdıkları anında iPhone'daki disk dosyasına kaydedilir.
-- **Save State:** makineyi kaldığı yerden devam ettirmek için RAM ve CPU durumu kaydedilir.
-- **Kontroller:** dokunmatik trackpad (dokun = tık, iki parmak = sağ tık, iki parmakla
-  kaydırma). Ekran klavyesi ⌨︎ ile açılır. Tuş çubuğunda Ctrl+Alt+Del, F1–F12, Esc, Win ve
-  ok tuşları var. Donanım klavyesi de çalışır.
-- **Windows XP kurulumu:** 512 MB RAM, 4 GB disk, ACPI kapalı. Kurulum başında F5'e basıp
-  "Standard PC" seçin.
+- **Supported:** 32-bit x86 systems — Windows 95/98/ME, Windows 2000/XP, Windows Vista/7
+  32-bit (experimental and very slow), 32-bit Linux ISOs, FreeDOS, KolibriOS, ReactOS…
+- **Not supported:** 64-bit systems. Use the QEMU engine for those.
+- **Hard disk:** what the guest writes is saved to the disk image on the iPhone right away.
+- **Save State:** RAM and CPU state are saved so the machine continues where it left off.
+- **Controls:** touch trackpad (tap = click, two-finger tap = right click, two-finger drag =
+  scroll). ⌨︎ opens the keyboard. The key bar has Ctrl+Alt+Del, F1–F12, Esc, Win and the
+  arrow keys. Hardware keyboards work too.
+- **Installing Windows XP:** 512 MB RAM, 4 GB disk, ACPI off. Press F5 at the start of setup
+  and choose "Standard PC".
 
-## QEMU motoru (Windows 11 ARM64 / x64, 64-bit Linux)
+### QEMU engine (Windows 11 ARM64 / x64, 64-bit Linux)
 
-64-bit sistemler için ikinci bir motor var: **QEMU**. UTM'in iOS için derlediği QEMU
-çatalı kullanılıyor (framework olarak, uygulama içinde bir iş parçacığında çalışır).
+For 64-bit systems the app uses **QEMU**, the iOS build from UTM (as frameworks, running on a
+thread inside the app).
 
-- **Makine türleri:** Windows 11 ARM64 (önerilen, daha hızlı), Windows 10/11 x64, Linux ARM64,
+- **Machine types:** Windows 11 ARM64 (recommended, faster), Windows 10/11 x64, Linux ARM64,
   Linux x86-64.
-- **Donanım:**
-  - ARM64: `virt`, UEFI, ramfb ekran, NVMe disk, USB CD/DVD, USB klavye ve tablet.
-  - x64: `q35`, UEFI, VGA, NVMe disk, AHCI CD/DVD, e1000e ağ.
-- **Windows 11 gereksinimleri:** Uygulama otomatik bir cevap diski (`autounattend.xml`)
-  ekler. Bu disk TPM 2.0, Secure Boot, 4 GB RAM ve CPU denetimlerini atlar ve ağsız yerel
-  hesap oluşturmaya izin verir (Ayarlar › "Skip Windows 11 checks").
-- **Ekran ve giriş:** QEMU'nun VNC sunucusu yerel bir Unix soketinden okunur.
-  - Dokunmak tıklar, basılı tutmak veya iki parmakla dokunmak sağ tıklar, sürüklemek
-    sürükler, iki parmakla kaydırılır.
-  - Klavye tuşları QEMU'nun tarama kodu (scancode) uzantısıyla gönderilir (US düzeni).
-- **Kontrol:** QMP üzerinden duraklatma, sıfırlama, ACPI ile kapatma ve CD değiştirme.
+- **Hardware:**
+  - ARM64: `virt`, UEFI, ramfb display, NVMe disk, USB CD/DVD, USB keyboard and tablet.
+  - x64: `q35`, UEFI, VGA, NVMe disk, AHCI CD/DVD, e1000e network.
+- **Windows 11 requirements:** the app attaches an answer disk (`autounattend.xml`) that skips
+  the TPM 2.0, Secure Boot, 4 GB RAM and CPU checks and allows a local account without a
+  network (Settings › "Skip Windows 11 checks").
+- **Screen and input:** QEMU's VNC server is read over a local Unix socket.
+  - Tap to click, touch and hold or tap with two fingers to right-click, drag to drag,
+    drag with two fingers to scroll.
+  - Keys are sent as scancodes through QEMU's extended key event extension (US layout).
+- **Control:** pause, reset, ACPI shutdown and CD changes over QMP.
 
-**Hız konusunda önemli:**
-- App Store'a uygun **TCI** sürümü JIT kullanmaz ve çok yavaştır. Windows 11 kurulumu
-  saatler sürebilir.
-- **JIT** sürümü çok daha hızlıdır, ancak uygulamanın sideload edilmesini ve JIT'in bir hata
-  ayıklayıcıyla (ör. StikDebug, SideStore) açılmasını gerektirir.
-- ARM64 misafirler x64'ten belirgin şekilde hızlıdır.
-- QEMU, uygulama her açıldığında yalnızca bir kez çalışabilir (UTM'deki kısıtla aynı).
+**About speed:**
+- The App Store compatible **TCI** build uses no JIT and is very slow. Installing Windows 11
+  can take hours.
+- The **JIT** build is much faster but requires sideloading the app and enabling JIT with a
+  debugger-based tool (e.g. StikDebug, SideStore).
+- ARM64 guests are clearly faster than x64 guests.
+- QEMU can run only once per app launch (the same limitation as in UTM).
 
-**QEMU'lu uygulamayı edinme:**
-1. **Hazır IPA:** GitHub Actions'taki **QEMU IPA** iş akışını çalıştırın (TCI veya JIT
-   seçin). Ortaya çıkan imzasız `.ipa` dosyasını SideStore, AltStore veya Sideloadly ile kendi
-   Apple kimliğinizle imzalayıp yükleyin.
-2. **Kendiniz derleme:** Mac'te `scripts/fetch-qemu-sysroot.sh tci` (veya `jit`) betiğini
-   çalıştırın, ardından `xcodegen generate` ile projeyi üretip cihaz için derleyin. QEMU
-   dosyaları derleme sırasında uygulamaya gömülür. `project.yml` içindeki `PVM_QEMU_FLAVOR`
-   değeri ile seçtiğiniz sürüm uyuşmalı.
+**Getting the app with QEMU:**
+1. **Prebuilt IPA:** run the **QEMU IPA** workflow in GitHub Actions (choose TCI or JIT). Sign
+   the resulting unsigned `.ipa` with your own Apple ID using SideStore, AltStore or
+   Sideloadly, and install it.
+2. **Build it yourself:** on a Mac, run `scripts/fetch-qemu-sysroot.sh tci` (or `jit`), then
+   generate the project with `xcodegen generate` and build for a device. The QEMU files are
+   embedded during the build. `PVM_QEMU_FLAVOR` in `project.yml` must match the flavour you
+   downloaded.
 
-**Diğer notlar:**
-- Uygulama, büyük RAM için `increased-memory-limit` ve `extended-virtual-addressing`
-  yetkilerini ister. Ücretsiz bir geliştirici hesabı bunları imzalayamazsa bu iki satırı
-  `project.yml` dosyasından silin.
-- **Lisans:** QEMU GPLv2 lisanslıdır. Kaynak kodu https://github.com/utmapp/qemu adresinde;
-  kullanılan derleme `QEMU-SOURCE.txt` dosyasında belirtilir.
+**Other notes:**
+- The app requests the `increased-memory-limit` and `extended-virtual-addressing`
+  entitlements for large guest RAM. If a free developer account cannot sign them, remove these
+  two lines from `project.yml`.
+- **License:** QEMU is licensed under GPLv2. Its source code is at
+  https://github.com/utmapp/qemu; the build used is recorded in `QEMU-SOURCE.txt`.
 
-## Ana ekrana ekleme
+## Adding a machine to the Home Screen
 
-Her sanal makine ana ekrana iki şekilde eklenebilir (uygulamada **Add to Home Screen…**
-adım adım gösterir):
+Every virtual machine can be added to the Home Screen in two ways (the app shows the steps
+under **Add to Home Screen…**):
 
-1. **Uygulama simgesi:** Kestirmeler (Shortcuts) uygulamasında *Start Virtual Machine*
-   eylemini seçip makineyi belirleyin, ardından *Ana Ekrana Ekle* deyin. İsim ve simgeyi siz
-   seçersiniz; simge ayrı bir uygulama gibi görünür. Siri'ye "Start ‹ad› in PocketVM" de
-   diyebilirsiniz.
-2. **Widget:** *PocketVM › Virtual Machine* widget'ını ekleyip düzenleyerek makineyi seçin.
+1. **App icon:** in the Shortcuts app, choose the *Start Virtual Machine* action, pick the
+   machine, then use *Add to Home Screen*. You choose the name and icon; it looks like a
+   separate app. You can also tell Siri "Start ‹name› in PocketVM".
+2. **Widget:** add the *PocketVM › Virtual Machine* widget and edit it to choose the machine.
 
-Her ikisi de `pocketvm://start?id=<uuid>` bağlantısıyla uygulamayı açar ve makineyi başlatır.
-Widget ile uygulama aynı App Group'u kullanır. İmzalamadan önce `project.yml` dosyasındaki
-`APP_BUNDLE_ID` ve `APP_GROUP_ID` değerlerini kendi kimliklerinizle değiştirin.
+Both open the app with a `pocketvm://start?id=<uuid>` link and start the machine. The widget
+and the app share an App Group. Before signing, replace `APP_BUNDLE_ID` and `APP_GROUP_ID` in
+`project.yml` with your own identifiers.
 
-## Proje yapısı
+## Project layout
 
 ```
-VMCore/                    Platformdan bağımsız emülatör çekirdeği (Swift Package)
+VMCore/                    Platform-independent emulator core (Swift package)
   Sources/VMCore/
-    RV32Machine.swift      CPU yorumlayıcısı + bellek + UART/CLINT/syscon
-    DeviceTree.swift       FDT (DTB) üretici
-    RVAssembler.swift      Küçük RISC-V assembler (firmware ve testler için)
-    MonitorFirmware.swift  Gömülü demo firmware
-    MachineSnapshot.swift  Durum kaydetme / geri yükleme
-    TerminalBuffer.swift   VT100 benzeri terminal modeli
-    VMEngine.swift         Arka plan iş parçacığında çalışan VM motoru
-    VMConfiguration.swift  Makine ayarları (Codable)
-    VMStore.swift          Diskteki makine kütüphanesi
-  Tests/VMCoreTests/       Birim testleri
-App/                       SwiftUI iOS uygulaması
+    RV32Machine.swift      CPU interpreter + memory + UART/CLINT/syscon
+    DeviceTree.swift       FDT (DTB) writer
+    RVAssembler.swift      Tiny RISC-V assembler (firmware and tests)
+    MonitorFirmware.swift  Built-in demo firmware
+    MachineSnapshot.swift  Save / restore machine state
+    TerminalBuffer.swift   VT100-like terminal model
+    VMEngine.swift         VM engine running on a background thread
+    VMConfiguration.swift  Machine settings (Codable)
+    VMStore*.swift         On-disk machine library, PC and QEMU media
+    QEMUArguments.swift    QEMU command line builder
+    RFBClient.swift        VNC client for the QEMU screen
+    QMPClient.swift        QEMU Machine Protocol client
+    FATImage.swift         FAT12 image + Windows answer file
+  Sources/QEMUShim/        C layer that runs QEMU inside the app
+  Tests/VMCoreTests/       Unit tests
+App/                       SwiftUI iOS app
   AppModel.swift, VMSession.swift
   Views/                   RootView, MachineDetailView, NewMachineView,
-                           MachineSettingsView, ConsoleView, TerminalInputView
-App/PC/                    x86 PC motoru (WKWebView + v86, disk/durum köprüsü)
-App/QEMU/                  QEMU motoru (başlatıcı, VNC ekranı, dokunmatik giriş)
-VMCore/Sources/QEMUShim/   QEMU'yu uygulama içinde başlatan C katmanı
-App/PCWeb/                 v86, BIOS'lar ve sayfa betikleri (pvm.js, pvm-disk.js)
-App/Intents/, Shared/      App Intents (Kestirmeler / Siri)
-Widget/                    Ana ekran widget'ı
-tests/pcweb/               Disk köprüsü testleri (Node.js)
-scripts/fetch-v86.sh       v86 ve BIOS'ları sabit sürümden indirir
-scripts/fetch-qemu-sysroot.sh  UTM'in iOS QEMU paketini indirir ve ayıklar
-project.yml                XcodeGen proje tanımı
+                           MachineSettingsView, ConsoleView, TerminalInputView, …
+App/PC/                    PC engine (WKWebView + v86, disk/state bridge)
+App/PCWeb/                 v86, BIOS images and page scripts (pvm.js, pvm-disk.js)
+App/QEMU/                  QEMU engine (launcher, VNC screen, touch input)
+App/Intents/, Shared/      App Intents (Shortcuts / Siri)
+Widget/                    Home Screen widget
+tests/pcweb/               Disk bridge tests (Node.js)
+scripts/fetch-v86.sh       Downloads v86 and the BIOS images at a pinned version
+scripts/fetch-qemu-sysroot.sh  Downloads and trims UTM's iOS QEMU sysroot
+project.yml                XcodeGen project definition
 ```
 
-## Derleme
+## Building
 
-Gereksinimler: Xcode 15 veya üstü (iOS 17 SDK) ve [XcodeGen](https://github.com/yonaskolb/XcodeGen).
+Requirements: Xcode 15 or later (iOS 17 SDK) and [XcodeGen](https://github.com/yonaskolb/XcodeGen).
 
 ```bash
 brew install xcodegen
-xcodegen generate          # PocketVM.xcodeproj dosyasını üretir
+xcodegen generate          # creates PocketVM.xcodeproj
 open PocketVM.xcodeproj
 ```
 
-Xcode'da *Signing & Capabilities* sekmesinden kendi Team'inizi seçin, gerekiyorsa
-`PRODUCT_BUNDLE_IDENTIFIER` değerini değiştirin ve uygulamayı iPhone'unuzda çalıştırın.
-Hız için **Release** yapılandırmasıyla derlemenizi öneririm. Debug derlemede yorumlayıcı
-çok daha yavaştır.
+In Xcode, choose your own Team under *Signing & Capabilities*, change
+`PRODUCT_BUNDLE_IDENTIFIER` if needed, and run the app on your iPhone. For speed, build with
+the **Release** configuration; the interpreter is much slower in Debug builds.
 
-Çekirdek testleri:
+Core tests:
 
 ```bash
 swift test --package-path VMCore
+node tests/pcweb/native-disk-unit.js
+node tests/pcweb/disk-test.js
 ```
 
-GitHub Actions (`.github/workflows/ci.yml`) her push'ta macOS üzerinde testleri çalıştırır
-ve uygulamayı iOS Simulator için derler.
+GitHub Actions (`.github/workflows/ci.yml`) runs the tests on every push and builds the app
+and widget for the iOS Simulator; `.github/workflows/qemu-ipa.yml` builds the device IPA with
+the QEMU engine.
 
-## Linux çalıştırmak
+## Running RISC-V Linux
 
-1. RV32 no-MMU bir Linux `Image` dosyası edinin. Örneğin
-   [cnlohr/mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) projesinin buildroot
-   yapılandırmasıyla derleyebilir ya da projenin yayınladığı hazır görüntülerden birini
-   kullanabilirsiniz.
-2. Uygulamada **+** → Tür: *Linux (RISC‑V 32‑bit, no‑MMU)* seçin, belleği 64 MB yapın ve
-   *Kernel Image* olarak dosyayı seçin.
-3. **Start**'a basın. Açılış mesajları konsolda görünür. `poweroff` yazarak makineyi
-   düzgünce kapatabilirsiniz.
+1. Get an RV32 no-MMU Linux `Image`, for example by building it with the buildroot
+   configuration of [cnlohr/mini-rv32ima](https://github.com/cnlohr/mini-rv32ima) or by using
+   one of the images that project publishes.
+2. In the app, tap **+**, choose type *Linux (RISC-V 32-bit, no-MMU)*, set the memory to
+   64 MB and choose the file as *Kernel Image*.
+3. Tap **Start**. Boot messages appear in the console; type `poweroff` to shut the machine
+   down cleanly.
 
-Varsayılan önyükleme argümanları:
+Default boot arguments:
 `earlycon=uart8250,mmio,0x10000000,1000000 console=ttyS0`
 
-## Yol haritası
+## Roadmap
 
-- QEMU motoru için kayıtlı durum (qcow2 + savevm), TPM (swtpm) ve SPICE ekranı
-- virtio-blk ile disk imajları (`.img`, `.qcow2`) ve paylaşılan klasörler
-- virtio-gpu / framebuffer ile grafik ekran
-- virtio-net ile ağ (NAT)
-- Sıkıştırılmış snapshot'lar ve makineyi "kaydederek kapatma" (Save State)
+- Saved state (qcow2 + savevm), TPM (swtpm) and a SPICE display for the QEMU engine
+- Network drivers out of the box for Windows 11 ARM64 guests
+- Shared folders between the iPhone and guests
+- A framebuffer display for the RISC-V engine
+- Compressed snapshots

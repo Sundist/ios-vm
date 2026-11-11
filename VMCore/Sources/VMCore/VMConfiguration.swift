@@ -6,6 +6,15 @@ public enum MachinePlatform: String, Codable, Sendable {
     case riscv
     /// 32-bit x86 PC (v86, running in a WebKit view).
     case pc
+    /// QEMU system emulator (ARM64 / x86-64 guests, UEFI).
+    case qemu
+}
+
+/// CPU architecture emulated by QEMU.
+public enum QEMUArchitecture: String, Codable, Sendable {
+    case aarch64, x86_64
+
+    public var displayName: String { self == .aarch64 ? "ARM64" : "x86-64" }
 }
 
 /// Guest operating system families the app can run.
@@ -17,6 +26,11 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
     case linuxX86
     case dosX86
     case otherX86
+    // QEMU
+    case windows11ARM
+    case windows11x64
+    case linuxARM64
+    case linuxX64
     // RISC-V
     case linuxRV32
     case builtInMonitor
@@ -26,8 +40,20 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
     public var platform: MachinePlatform {
         switch self {
         case .builtInMonitor, .linuxRV32: return .riscv
+        case .windows11ARM, .windows11x64, .linuxARM64, .linuxX64: return .qemu
         default: return .pc
         }
+    }
+
+    /// QEMU target for QEMU machines.
+    public var qemuArchitecture: QEMUArchitecture {
+        switch self {
+        case .windows11x64, .linuxX64: return .x86_64
+        default: return .aarch64
+        }
+    }
+
+    public var isWindows11: Bool { self == .windows11ARM || self == .windows11x64 }
     }
 
     public var displayName: String {
@@ -38,6 +64,10 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86: return "Linux / BSD (32-bit x86)"
         case .dosX86: return "DOS / FreeDOS / Windows 3.x"
         case .otherX86: return "Other x86 (ISO, disk or floppy)"
+        case .windows11ARM: return "Windows 11 ARM64 (QEMU)"
+        case .windows11x64: return "Windows 10 / 11 x64 (QEMU)"
+        case .linuxARM64: return "Linux ARM64 (QEMU)"
+        case .linuxX64: return "Linux x86-64 (QEMU)"
         case .linuxRV32: return "Linux (RISC-V 32-bit, no-MMU)"
         case .builtInMonitor: return "PocketVM Monitor (built-in)"
         }
@@ -51,6 +81,10 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86: return "Linux"
         case .dosX86: return "DOS"
         case .otherX86: return "PC"
+        case .windows11ARM: return "Windows 11 ARM"
+        case .windows11x64: return "Windows 11"
+        case .linuxARM64: return "Linux ARM64"
+        case .linuxX64: return "Linux x64"
         case .linuxRV32: return "Linux RV32"
         case .builtInMonitor: return "Monitor"
         }
@@ -62,6 +96,8 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86, .linuxRV32: return "terminal"
         case .dosX86: return "keyboard"
         case .otherX86: return "opticaldisc"
+        case .windows11ARM, .windows11x64: return "macwindow"
+        case .linuxARM64, .linuxX64: return "server.rack"
         case .builtInMonitor: return "cpu"
         }
     }
@@ -73,6 +109,8 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86, .linuxRV32: return "orange"
         case .dosX86: return "gray"
         case .otherX86: return "purple"
+        case .windows11ARM, .windows11x64: return "indigo"
+        case .linuxARM64, .linuxX64: return "green"
         case .builtInMonitor: return "teal"
         }
     }
@@ -89,6 +127,8 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86: return 256
         case .dosX86: return 32
         case .otherX86: return 128
+        case .windows11ARM, .windows11x64: return 4096
+        case .linuxARM64, .linuxX64: return 2048
         }
     }
 
@@ -101,6 +141,8 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
         case .linuxX86: return 4
         case .dosX86: return 1
         case .otherX86: return 0
+        case .windows11ARM, .windows11x64: return 64
+        case .linuxARM64, .linuxX64: return 20
         case .linuxRV32, .builtInMonitor: return 0
         }
     }
@@ -131,6 +173,14 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
             return "Boots from a floppy image, a CD or a hard disk image."
         case .otherX86:
             return "Any 32-bit x86 operating system: KolibriOS, ReactOS, Haiku, BSD…"
+        case .windows11ARM:
+            return "Use a Windows 11 ARM64 ISO. Faster than x64 on iPhone, but still emulated: expect a very slow install without JIT. TPM, Secure Boot and RAM checks are bypassed automatically."
+        case .windows11x64:
+            return "Use a Windows 10/11 x64 ISO. x86-64 is fully emulated and extremely slow without JIT. TPM, Secure Boot and RAM checks are bypassed automatically."
+        case .linuxARM64:
+            return "Use an ARM64 (aarch64) ISO with UEFI support, e.g. Ubuntu Server or Debian arm64."
+        case .linuxX64:
+            return "Use an x86-64 ISO with UEFI support."
         case .linuxRV32:
             return "Boots a 32-bit RISC-V Linux kernel on an emulated CPU with a 16550 serial console."
         case .builtInMonitor:
@@ -139,6 +189,7 @@ public enum GuestOSType: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 
     public static var pcTypes: [GuestOSType] { allCases.filter { $0.platform == .pc } }
+    public static var qemuTypes: [GuestOSType] { allCases.filter { $0.platform == .qemu } }
     public static var riscvTypes: [GuestOSType] { allCases.filter { $0.platform == .riscv } }
 }
 
@@ -187,6 +238,7 @@ public struct SnapshotInfo: Codable, Identifiable, Hashable, Sendable {
 public struct VMConfiguration: Codable, Identifiable, Hashable, Sendable {
     public static let riscvMemoryRangeMB = 1...512
     public static let pcMemoryRangeMB = 16...2048
+    public static let qemuMemoryRangeMB = 512...16384
 
     public var id: UUID
     public var name: String
@@ -218,6 +270,11 @@ public struct VMConfiguration: Codable, Identifiable, Hashable, Sendable {
     /// True while a "Save State" image exists (VirtualBox: *Saved*).
     public var hasSavedState: Bool
 
+    // QEMU
+    public var cpuCount: Int
+    /// Attach an answer file that skips Windows 11's TPM / Secure Boot / RAM / CPU checks.
+    public var bypassWindowsRequirements: Bool
+
     public init(
         id: UUID = UUID(),
         name: String,
@@ -248,6 +305,8 @@ public struct VMConfiguration: Codable, Identifiable, Hashable, Sendable {
         self.floppyFileName = nil
         self.floppyByteCount = nil
         self.hasSavedState = false
+        self.cpuCount = osType.platform == .qemu ? 2 : 1
+        self.bypassWindowsRequirements = osType.isWindows11
     }
 
     // Decoding tolerates files written by older versions of the app.
@@ -275,12 +334,18 @@ public struct VMConfiguration: Codable, Identifiable, Hashable, Sendable {
         floppyFileName = try c.decodeIfPresent(String.self, forKey: .floppyFileName)
         floppyByteCount = try c.decodeIfPresent(Int64.self, forKey: .floppyByteCount)
         hasSavedState = try c.decodeIfPresent(Bool.self, forKey: .hasSavedState) ?? false
+        cpuCount = try c.decodeIfPresent(Int.self, forKey: .cpuCount) ?? (osType.platform == .qemu ? 2 : 1)
+        bypassWindowsRequirements = try c.decodeIfPresent(Bool.self, forKey: .bypassWindowsRequirements) ?? osType.isWindows11
     }
 
     public var platform: MachinePlatform { osType.platform }
 
     public var memoryRangeMB: ClosedRange<Int> {
-        platform == .pc ? Self.pcMemoryRangeMB : Self.riscvMemoryRangeMB
+        switch platform {
+        case .pc: return Self.pcMemoryRangeMB
+        case .qemu: return Self.qemuMemoryRangeMB
+        case .riscv: return Self.riscvMemoryRangeMB
+        }
     }
 
     /// Guest RAM for the RISC-V machine.
@@ -304,7 +369,7 @@ public struct VMConfiguration: Codable, Identifiable, Hashable, Sendable {
             if let size = kernelByteCount, size > Int64(ramBytes) - Int64(RV32Machine.deviceTreeReserve) {
                 return "The kernel image is larger than the base memory. Increase the memory size."
             }
-        case .pc:
+        case .pc, .qemu:
             if !hasBootMedia {
                 return "Attach a CD/DVD image (ISO), a hard disk or a floppy image in Settings › Storage."
             }

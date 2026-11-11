@@ -65,6 +65,13 @@ struct MachineDetailView: View {
                     LabeledContent("Boot Order", value: config.bootDevice.displayName)
                     LabeledContent("ACPI", value: config.acpiEnabled ? "On" : "Off")
                     LabeledContent("Video Memory", value: "\(config.vgaMemoryMB) MB")
+                } else if config.platform == .qemu {
+                    LabeledContent("Processors", value: "\(config.cpuCount) × \(config.osType.qemuArchitecture.displayName)")
+                    LabeledContent("Firmware", value: "UEFI")
+                    LabeledContent("Acceleration", value: QEMURuntime.shared.flavor == .jit ? "QEMU TCG (JIT)" : "QEMU TCTI (no JIT)")
+                    if config.osType.isWindows11 {
+                        LabeledContent("Windows 11 checks", value: config.bypassWindowsRequirements ? "Bypassed" : "Enforced")
+                    }
                 } else {
                     LabeledContent("Processor", value: "1 × RV32IMA")
                     LabeledContent("Acceleration", value: "Interpreter")
@@ -75,7 +82,7 @@ struct MachineDetailView: View {
             }
 
             Section("Storage") {
-                if config.platform == .pc {
+                if config.platform == .pc || config.platform == .qemu {
                     LabeledContent {
                         Text(config.cdromName ?? "Empty").foregroundStyle(config.cdromName == nil ? .secondary : .primary)
                     } label: {
@@ -130,7 +137,7 @@ struct MachineDetailView: View {
                 } header: {
                     Text("Saved State")
                 }
-            } else {
+            } else if config.platform == .riscv {
                 snapshotsSection(config: config, state: state)
             }
 
@@ -266,7 +273,7 @@ struct MachineDetailView: View {
             }
             .buttonStyle(.bordered)
         } else {
-            if let problem = config.startProblem {
+            if let problem = config.startProblem ?? model.qemuEngineProblem(for: config) {
                 Label(problem, systemImage: "exclamationmark.circle")
                     .font(.footnote)
                     .foregroundStyle(.orange)

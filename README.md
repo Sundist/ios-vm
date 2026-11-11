@@ -58,6 +58,49 @@ JIT yalnızca WebKit'e izinli olduğu için v86 bir `WKWebView` içinde çalış
 - **Windows XP kurulumu:** 512 MB RAM, 4 GB disk, ACPI kapalı. Kurulum başında F5'e basıp
   "Standard PC" seçin.
 
+## QEMU motoru (Windows 11 ARM64 / x64, 64-bit Linux)
+
+64-bit sistemler için ikinci bir motor var: **QEMU**. UTM'in iOS için derlediği QEMU
+çatalı kullanılıyor (framework olarak, uygulama içinde bir iş parçacığında çalışır).
+
+- **Makine türleri:** Windows 11 ARM64 (önerilen, daha hızlı), Windows 10/11 x64, Linux ARM64,
+  Linux x86-64.
+- **Donanım:**
+  - ARM64: `virt`, UEFI, ramfb ekran, NVMe disk, USB CD/DVD, USB klavye ve tablet.
+  - x64: `q35`, UEFI, VGA, NVMe disk, AHCI CD/DVD, e1000e ağ.
+- **Windows 11 gereksinimleri:** Uygulama otomatik bir cevap diski (`autounattend.xml`)
+  ekler. Bu disk TPM 2.0, Secure Boot, 4 GB RAM ve CPU denetimlerini atlar ve ağsız yerel
+  hesap oluşturmaya izin verir (Ayarlar › "Skip Windows 11 checks").
+- **Ekran ve giriş:** QEMU'nun VNC sunucusu yerel bir Unix soketinden okunur.
+  - Dokunmak tıklar, basılı tutmak veya iki parmakla dokunmak sağ tıklar, sürüklemek
+    sürükler, iki parmakla kaydırılır.
+  - Klavye tuşları QEMU'nun tarama kodu (scancode) uzantısıyla gönderilir (US düzeni).
+- **Kontrol:** QMP üzerinden duraklatma, sıfırlama, ACPI ile kapatma ve CD değiştirme.
+
+**Hız konusunda önemli:**
+- App Store'a uygun **TCI** sürümü JIT kullanmaz ve çok yavaştır. Windows 11 kurulumu
+  saatler sürebilir.
+- **JIT** sürümü çok daha hızlıdır, ancak uygulamanın sideload edilmesini ve JIT'in bir hata
+  ayıklayıcıyla (ör. StikDebug, SideStore) açılmasını gerektirir.
+- ARM64 misafirler x64'ten belirgin şekilde hızlıdır.
+- QEMU, uygulama her açıldığında yalnızca bir kez çalışabilir (UTM'deki kısıtla aynı).
+
+**QEMU'lu uygulamayı edinme:**
+1. **Hazır IPA:** GitHub Actions'taki **QEMU IPA** iş akışını çalıştırın (TCI veya JIT
+   seçin). Ortaya çıkan imzasız `.ipa` dosyasını SideStore, AltStore veya Sideloadly ile kendi
+   Apple kimliğinizle imzalayıp yükleyin.
+2. **Kendiniz derleme:** Mac'te `scripts/fetch-qemu-sysroot.sh tci` (veya `jit`) betiğini
+   çalıştırın, ardından `xcodegen generate` ile projeyi üretip cihaz için derleyin. QEMU
+   dosyaları derleme sırasında uygulamaya gömülür. `project.yml` içindeki `PVM_QEMU_FLAVOR`
+   değeri ile seçtiğiniz sürüm uyuşmalı.
+
+**Diğer notlar:**
+- Uygulama, büyük RAM için `increased-memory-limit` ve `extended-virtual-addressing`
+  yetkilerini ister. Ücretsiz bir geliştirici hesabı bunları imzalayamazsa bu iki satırı
+  `project.yml` dosyasından silin.
+- **Lisans:** QEMU GPLv2 lisanslıdır. Kaynak kodu https://github.com/utmapp/qemu adresinde;
+  kullanılan derleme `QEMU-SOURCE.txt` dosyasında belirtilir.
+
 ## Ana ekrana ekleme
 
 Her sanal makine ana ekrana iki şekilde eklenebilir (uygulamada **Add to Home Screen…**
@@ -93,11 +136,14 @@ App/                       SwiftUI iOS uygulaması
   Views/                   RootView, MachineDetailView, NewMachineView,
                            MachineSettingsView, ConsoleView, TerminalInputView
 App/PC/                    x86 PC motoru (WKWebView + v86, disk/durum köprüsü)
+App/QEMU/                  QEMU motoru (başlatıcı, VNC ekranı, dokunmatik giriş)
+VMCore/Sources/QEMUShim/   QEMU'yu uygulama içinde başlatan C katmanı
 App/PCWeb/                 v86, BIOS'lar ve sayfa betikleri (pvm.js, pvm-disk.js)
 App/Intents/, Shared/      App Intents (Kestirmeler / Siri)
 Widget/                    Ana ekran widget'ı
 tests/pcweb/               Disk köprüsü testleri (Node.js)
 scripts/fetch-v86.sh       v86 ve BIOS'ları sabit sürümden indirir
+scripts/fetch-qemu-sysroot.sh  UTM'in iOS QEMU paketini indirir ve ayıklar
 project.yml                XcodeGen proje tanımı
 ```
 
@@ -141,7 +187,7 @@ Varsayılan önyükleme argümanları:
 
 ## Yol haritası
 
-- QEMU (TCG/TCI) tabanlı bir motorla x86_64 ve ARM64 misafirler (64-bit Windows için gerekli)
+- QEMU motoru için kayıtlı durum (qcow2 + savevm), TPM (swtpm) ve SPICE ekranı
 - virtio-blk ile disk imajları (`.img`, `.qcow2`) ve paylaşılan klasörler
 - virtio-gpu / framebuffer ile grafik ekran
 - virtio-net ile ağ (NAT)

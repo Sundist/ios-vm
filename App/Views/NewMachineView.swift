@@ -7,15 +7,16 @@ struct NewMachineView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = GuestOSType.windowsNT.shortName
-    @State private var osType: GuestOSType = .windowsNT
-    @State private var memoryMB = GuestOSType.windowsNT.defaultMemoryMB
+    @State private var name = GuestOSType.windows11ARM.shortName
+    @State private var osType: GuestOSType = .windows11ARM
+    @State private var memoryMB = GuestOSType.windows11ARM.defaultMemoryMB
     @State private var createDisk = true
-    @State private var diskSizeGB = GuestOSType.windowsNT.defaultDiskGB
+    @State private var diskSizeGB = GuestOSType.windows11ARM.defaultDiskGB
     @State private var bootArguments = ""
     @State private var cdromURL: URL?
     @State private var kernelURL: URL?
     @State private var importer: ImporterKind?
+    @State private var cpuCount = 2
 
     private enum ImporterKind: Identifiable {
         case cdrom, kernel
@@ -29,7 +30,12 @@ struct NewMachineView: View {
                     TextField("Name", text: $name)
                         .textInputAutocapitalization(.words)
                     Picker("Type", selection: $osType) {
-                        Section("PC (x86)") {
+                        Section("QEMU (64-bit, UEFI)") {
+                            ForEach(GuestOSType.qemuTypes) { type in
+                                Label(type.displayName, systemImage: type.symbolName).tag(type)
+                            }
+                        }
+                        Section("PC (32-bit x86, v86)") {
                             ForEach(GuestOSType.pcTypes) { type in
                                 Label(type.displayName, systemImage: type.symbolName).tag(type)
                             }
@@ -54,7 +60,17 @@ struct NewMachineView: View {
                     Text("Guest RAM comes out of the iPhone's memory while the machine runs. If iOS stops the machine, use less.")
                 }
 
-                if osType.platform == .pc {
+                if osType.platform == .qemu {
+                    Section {
+                        Stepper(value: $cpuCount, in: 1...4) {
+                            LabeledContent("Processors", value: "\(cpuCount)")
+                        }
+                    } footer: {
+                        Text("Each emulated processor uses one iPhone CPU core while busy.")
+                    }
+                }
+
+                if osType.platform == .pc || osType.platform == .qemu {
                     Section {
                         Button {
                             importer = .cdrom
@@ -71,7 +87,7 @@ struct NewMachineView: View {
                             Label("Create a hard disk", systemImage: "internaldrive")
                         }
                         if createDisk {
-                            Stepper(value: $diskSizeGB, in: 1...64) {
+                            Stepper(value: $diskSizeGB, in: 1...(osType.platform == .qemu ? 256 : 64)) {
                                 LabeledContent("Size", value: "\(diskSizeGB) GB")
                             }
                         }
@@ -114,6 +130,7 @@ struct NewMachineView: View {
             }
             .onChange(of: osType) { oldValue, newValue in
                 memoryMB = newValue.defaultMemoryMB
+                cpuCount = newValue.platform == .qemu ? 2 : 1
                 diskSizeGB = max(newValue.defaultDiskGB, 1)
                 createDisk = newValue.defaultDiskGB > 0
                 bootArguments = newValue.defaultBootArguments
@@ -145,11 +162,15 @@ struct NewMachineView: View {
         if osType.platform == .pc {
             config.bootDevice = cdromURL != nil ? .cdrom : .automatic
         }
+        if osType.platform == .qemu {
+            config.cpuCount = cpuCount
+        }
+        let usesDisks = osType.platform == .pc || osType.platform == .qemu
         let created = model.create(
             config,
             kernel: osType.requiresKernel ? kernelURL : nil,
-            cdrom: osType.platform == .pc ? cdromURL : nil,
-            diskSizeGB: osType.platform == .pc && createDisk ? diskSizeGB : 0)
+            cdrom: usesDisks ? cdromURL : nil,
+            diskSizeGB: usesDisks && createDisk ? diskSizeGB : 0)
         if created != nil {
             dismiss()
         }
@@ -163,9 +184,11 @@ struct MemoryPicker: View {
     var isDisabled = false
 
     private var presets: [Int] {
-        platform == .pc
-            ? [16, 32, 64, 128, 256, 512, 768, 1024, 1536, 2048]
-            : [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        switch platform {
+        case .pc: return [16, 32, 64, 128, 256, 512, 768, 1024, 1536, 2048]
+        case .qemu: return [512, 1024, 2048, 3072, 4096, 6144, 8192]
+        case .riscv: return [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+        }
     }
 
     var body: some View {
@@ -185,8 +208,8 @@ struct MemoryPicker: View {
                 Text(presets.last! >= 1024 ? "\(presets.last! / 1024) GB" : "\(presets.last!) MB").font(.caption2)
             }
             .disabled(isDisabled)
-            if platform == .pc && memoryMB > 1024 {
-                Text("More than 1 GB may be stopped by iOS on devices with less memory.")
+            if (platform == .pc && memoryMB > 1024) || (platform == .qemu && memoryMB > 3072) {
+                Text("iOS may stop the machine if it uses more memory than the device allows for one app.")
                     .font(.caption)
                     .foregroundStyle(.orange)
             }

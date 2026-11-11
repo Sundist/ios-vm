@@ -15,6 +15,7 @@ final class AppModel {
     private(set) var machines: [VMConfiguration] = []
     private(set) var sessions: [UUID: VMSession] = [:]
     private(set) var pcSessions: [UUID: PCSession] = [:]
+    private(set) var qemuSessions: [UUID: QEMUSession] = [:]
     var selection: UUID?
     var consoleTarget: ConsoleTarget?
     var errorMessage: String?
@@ -51,6 +52,7 @@ final class AppModel {
 
     func state(for id: UUID) -> VMEngine.State {
         if let pc = pcSessions[id] { return pc.state }
+        if let qemu = qemuSessions[id] { return qemu.state }
         return sessions[id]?.state ?? .stopped
     }
 
@@ -110,6 +112,8 @@ final class AppModel {
         sessions[id] = nil
         pcSessions[id]?.terminate()
         pcSessions[id] = nil
+        if let qemu = qemuSessions[id], qemu.state.isActive { qemu.powerOff() }
+        qemuSessions[id] = nil
         if consoleTarget?.id == id { consoleTarget = nil }
         do {
             try store.delete(id)
@@ -197,6 +201,10 @@ final class AppModel {
             if startPC(config) != nil {
                 consoleTarget = ConsoleTarget(id: id)
             }
+        case .qemu:
+            if startQEMU(config) != nil {
+                consoleTarget = ConsoleTarget(id: id)
+            }
         }
     }
 
@@ -254,6 +262,54 @@ final class AppModel {
         }
     }
 
+    @discardableResult
+    private func startQEMU(_ config: VMConfiguration) -> QEMUSession? {
+        let id = config.id
+        if let existing = qemuSessions[id], existing.state.isActive {
+            return existing
+        }
+        var config = config
+        let runtime = QEMURuntime.shared
+        do {
+            if let problem = runtime.startProblem(for: config.osType.qemuArchitecture) {
+                throw VMError.invalidImage(problem)
+            }
+            let plan = try store.makeQEMULaunchPlan(
+                for: &config,
+                resourceDirectory: runtime.resourceDirectory,
+                socketDirectory: FileManager.default.temporaryDirectory.appendingPathComponent("q", isDirectory: true),
+                splitWX: runtime.flavor == .jit)
+            let session = QEMUSession(id: id)
+            do {
+                try session.start(plan: plan)
+            } catch {
+                plan.accessedURLs.forEach { $0.stopAccessingSecurityScopedResource() }
+                throw error
+            }
+            qemuSessions[id] = session
+            markStarted(config)
+            return session
+        } catch {
+            report(error)
+            return nil
+        }
+    }
+
+    /// Problem that prevents QEMU machines from starting in this app run.
+    func qemuEngineProblem(for config: VMConfiguration) -> String? {
+        guard config.platform == .qemu else { return nil }
+        if let session = qemuSessions[config.id], session.state.isActive { return nil }
+        return QEMURuntime.shared.startProblem(for: config.osType.qemuArchitecture)
+    }
+
+    func resetEFIVariables(of id: UUID) {
+        do {
+            try store.resetEFIVariables(for: id)
+        } catch {
+            report(error)
+        }
+    }
+
     func saveState(of id: UUID) async {
         guard let session = pcSessions[id], session.state.isActive else { return }
         do {
@@ -273,19 +329,21 @@ final class AppModel {
     // Engine-independent controls used by the details pane.
 
     func pause(_ id: UUID) {
-        if let pc = pcSessions[id] { pc.pause() } else { sessions[id]?.pause() }
+        if let pc = pcSessions[id] { pc.pause() } else if let q = qemuSessions[id] { q.pause() } else { sessions[id]?.pause() }
     }
 
     func resume(_ id: UUID) {
-        if let pc = pcSessions[id] { pc.resume() } else { sessions[id]?.resume() }
+        if let pc = pcSessions[id] { pc.resume() } else if let q = qemuSessions[id] { q.resume() } else { sessions[id]?.resume() }
     }
 
     func reset(_ id: UUID) {
-        if let pc = pcSessions[id] { pc.reset() } else { sessions[id]?.reset() }
+        if let pc = pcSessions[id] { pc.reset() } else if let q = qemuSessions[id] { q.reset() } else { sessions[id]?.reset() }
     }
 
     func powerOff(_ id: UUID) {
-        if pcSessions[id] != nil {
+        if let q = qemuSessions[id] {
+            q.powerOff()
+        } else if pcSessions[id] != nil {
             Task { await powerOffPC(id) }
         } else {
             sessions[id]?.powerOff()

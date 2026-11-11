@@ -9,6 +9,8 @@ settings:
     # Change these two to your own identifiers before signing.
     APP_BUNDLE_ID: com.example.pocketvm
     APP_GROUP_ID: group.com.example.pocketvm
+    # QEMU engine flavour embedded by scripts/embed-qemu.sh: tci (no JIT) or jit.
+    PVM_QEMU_FLAVOR: tci
     MARKETING_VERSION: "1.1"
     CURRENT_PROJECT_VERSION: "2"
     SWIFT_VERSION: "5.0"
@@ -29,6 +31,9 @@ targets:
       - path: Shared
     dependencies:
       - package: VMCore
+        product: VMCore
+      - package: VMCore
+        product: QEMUShim
       - target: PocketVMWidget
     info:
       path: App/Info.plist
@@ -36,6 +41,7 @@ targets:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         PVMAppGroup: $(APP_GROUP_ID)
+        PVMQEMUFlavor: $(PVM_QEMU_FLAVOR)
         CFBundleURLTypes:
           - CFBundleURLName: $(APP_BUNDLE_ID)
             CFBundleURLSchemes: [pocketvm]
@@ -43,11 +49,15 @@ targets:
       path: App/PocketVM.entitlements
       properties:
         com.apple.security.application-groups: [$(APP_GROUP_ID)]
+        # QEMU guests need several GB of RAM inside the app process.
+        com.apple.developer.kernel.increased-memory-limit: true
+        com.apple.developer.kernel.extended-virtual-addressing: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         INFOPLIST_KEY_CFBundleDisplayName: PocketVM
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
@@ -56,6 +66,10 @@ targets:
       configs:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+    postBuildScripts:
+      - name: Embed QEMU engine
+        script: "\"$SRCROOT/scripts/embed-qemu.sh\""
+        basedOnDependencyAnalysis: false
 
   PocketVMWidget:
     type: app-extension

@@ -48,7 +48,7 @@ struct MachineSettingsView: View {
                 Section("General") {
                     TextField("Name", text: $config.name)
                     Picker("Type", selection: $config.osType) {
-                        ForEach(config.platform == .pc ? GuestOSType.pcTypes : GuestOSType.riscvTypes) { type in
+                        ForEach(typesForPlatform) { type in
                             Text(type.displayName).tag(type)
                         }
                     }
@@ -68,15 +68,29 @@ struct MachineSettingsView: View {
                             ForEach(BootDevice.allCases) { Text($0.displayName).tag($0) }
                         }
                     }
+                    if config.platform == .qemu {
+                        Stepper(value: $config.cpuCount, in: 1...4) {
+                            LabeledContent("Processors", value: "\(config.cpuCount)")
+                        }
+                        .disabled(isRunning)
+                        if config.osType.isWindows11 {
+                            Toggle("Skip Windows 11 checks", isOn: $config.bypassWindowsRequirements)
+                                .disabled(isRunning)
+                        }
+                        Button("Reset UEFI Boot Entries") { model.resetEFIVariables(of: config.id) }
+                            .disabled(isRunning)
+                    }
                 } header: {
                     Text("System")
                 } footer: {
-                    if config.platform == .pc {
+                    if config.platform == .qemu {
+                        Text("“Skip Windows 11 checks” attaches an answer disk that bypasses the TPM, Secure Boot, RAM and CPU requirements and allows a local account. Resetting the UEFI boot entries helps when the firmware no longer finds the installed system.")
+                    } else if config.platform == .pc {
                         Text("Windows 95–XP need ACPI off. Vista/7 and most Linux distributions want it on.\(current.hasSavedState && hardwareChanged ? " Changing the hardware discards the saved state." : "")")
                     }
                 }
 
-                if config.platform == .pc {
+                if config.platform == .pc || config.platform == .qemu {
                     pcStorage
                 } else if config.osType.requiresKernel {
                     kernelStorage
@@ -120,6 +134,14 @@ struct MachineSettingsView: View {
         }
     }
 
+    private var typesForPlatform: [GuestOSType] {
+        switch config.platform {
+        case .pc: return GuestOSType.pcTypes
+        case .qemu: return GuestOSType.qemuTypes
+        case .riscv: return GuestOSType.riscvTypes
+        }
+    }
+
     private func size(_ bytes: Int64?) -> String {
         ByteCountFormatter.string(fromByteCount: bytes ?? 0, countStyle: .file)
     }
@@ -144,7 +166,7 @@ struct MachineSettingsView: View {
                     Button("Delete Hard Disk", role: .destructive) { confirmRemoveDisk = true }
                         .disabled(isRunning)
                 } else {
-                    Stepper(value: $newDiskSizeGB, in: 1...64) {
+                    Stepper(value: $newDiskSizeGB, in: 1...(config.platform == .qemu ? 256 : 64)) {
                         LabeledContent("New disk", value: "\(newDiskSizeGB) GB")
                     }
                     Button("Create Hard Disk") { model.createHardDisk(sizeGB: newDiskSizeGB, for: config.id) }
@@ -158,6 +180,7 @@ struct MachineSettingsView: View {
                 Text("Raw images only. Convert VirtualBox/QEMU disks first, e.g. qemu-img convert -O raw disk.vdi disk.img")
             }
 
+            if config.platform == .pc {
             Section {
                 if current.floppyFileName != nil {
                     LabeledContent("Image", value: size(current.floppyByteCount))
@@ -169,6 +192,7 @@ struct MachineSettingsView: View {
                 }
             } header: {
                 Label("Floppy", systemImage: "square.and.arrow.down.on.square")
+            }
             }
         }
     }
@@ -226,6 +250,9 @@ struct MachineSettingsView: View {
         model.update(updated)
         if latest.hasSavedState && hardwareChanged {
             model.discardSavedState(of: config.id)
+        }
+        if updated.platform == .qemu && updated.osType.qemuArchitecture != original.osType.qemuArchitecture {
+            model.resetEFIVariables(of: config.id)   // ARM64 and x86-64 firmware differ
         }
         dismiss()
     }

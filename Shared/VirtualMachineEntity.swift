@@ -58,6 +58,8 @@ extension GuestOSType {
         case "orange": return .orange
         case "gray": return .gray
         case "purple": return .purple
+        case "indigo": return .indigo
+        case "green": return .green
         default: return .teal
         }
     }

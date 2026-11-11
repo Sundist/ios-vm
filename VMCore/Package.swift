@@ -6,9 +6,11 @@ let package = Package(
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [
         .library(name: "VMCore", targets: ["VMCore"]),
+        .library(name: "QEMUShim", targets: ["QEMUShim"]),
     ],
     targets: [
         .target(name: "VMCore"),
+        .target(name: "QEMUShim"),
         .testTarget(name: "VMCoreTests", dependencies: ["VMCore"]),
     ]
 )

@@ -125,6 +125,8 @@ struct ConsoleWindow: View {
         let name = model.machine(machineID)?.name ?? "Virtual Machine"
         if let pc = model.pcSessions[machineID] {
             PCConsoleView(session: pc, machineName: name)
+        } else if let qemu = model.qemuSessions[machineID] {
+            QEMUConsoleView(session: qemu, machineName: name)
         } else if let session = model.sessions[machineID] {
             ConsoleView(session: session, machineName: name)
         } else {

@@ -1,0 +1,67 @@
+name: QEMU IPA
+
+# Builds an unsigned PocketVM.ipa that includes the QEMU engine (UTM's
+# prebuilt iOS QEMU sysroot). Sign it with your own Apple ID, e.g. with
+# SideStore, AltStore or Sideloadly.
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: "QEMU engine: tci (works without JIT) or jit (needs JIT enabled)"
+        type: choice
+        options: [tci, jit]
+        default: tci
+  push:
+    branches: [main, "claude/**"]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  ipa:
+    runs-on: macos-15
+    env:
+      FLAVOR: ${{ inputs.flavor || 'tci' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch QEMU sysroot from UTM
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/fetch-qemu-sysroot.sh "$FLAVOR"
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Archive (device, unsigned)
+        run: |
+          xcodebuild archive \
+            -project PocketVM.xcodeproj \
+            -scheme PocketVM \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/PocketVM.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            PVM_QEMU_FLAVOR="$FLAVOR"
+
+      - name: Package IPA
+        run: |
+          APP=build/PocketVM.xcarchive/Products/Applications/PocketVM.app
+          test -f "$APP/Frameworks/qemu-aarch64-softmmu.framework/qemu-aarch64-softmmu"
+          test -f "$APP/qemu/edk2-aarch64-code.fd"
+          mkdir -p build/ipa/Payload
+          cp -R "$APP" build/ipa/Payload/
+          cp QEMU/$FLAVOR/SOURCE.txt build/ipa/QEMU-SOURCE.txt
+          (cd build/ipa && zip -qry "../PocketVM-qemu-$FLAVOR.ipa" Payload)
+          ls -lh build/*.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PocketVM-qemu-${{ env.FLAVOR }}
+          path: |
+            build/PocketVM-qemu-${{ env.FLAVOR }}.ipa
+            build/ipa/QEMU-SOURCE.txt
+          retention-days: 30

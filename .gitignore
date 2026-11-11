@@ -9,4 +9,4 @@ Widget/Info.plist
 App/PocketVM.entitlements
 Widget/PocketVMWidget.entitlements
 node_modules/
-QEMU/
+/QEMU/

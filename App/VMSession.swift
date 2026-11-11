@@ -12,7 +12,7 @@ final class VMSession: Identifiable {
     private(set) var state: VMEngine.State = .stopped
     private(set) var instructionsPerSecond: Double = 0
 
-    @ObservationIgnored let engine: VMEngine
+    let engine: VMEngine
     @ObservationIgnored private var terminal = TerminalBuffer(maxLines: 1000)
     @ObservationIgnored private var timer: Timer?
 

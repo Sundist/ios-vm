@@ -5,3 +5,7 @@ DerivedData/
 *.xcodeproj/
 xcuserdata/
 App/Info.plist
+Widget/Info.plist
+App/PocketVM.entitlements
+Widget/PocketVMWidget.entitlements
+node_modules/

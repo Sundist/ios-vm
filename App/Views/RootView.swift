@@ -5,6 +5,7 @@ import VMCore
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @State private var showingNewMachine = false
+    private var router: LaunchRouter { LaunchRouter.shared }
 
     var body: some View {
         @Bindable var model = model
@@ -16,8 +17,7 @@ struct RootView: View {
                     }
                     .contextMenu {
                         Button {
-                            model.start(machine.id)
-                            model.selection = machine.id
+                            model.launch(machine.id)
                         } label: { Label("Start", systemImage: "play.fill") }
                         Button {
                             model.clone(machine.id)
@@ -64,6 +64,19 @@ struct RootView: View {
         .sheet(isPresented: $showingNewMachine) {
             NewMachineView()
         }
+        .fullScreenCover(item: $model.consoleTarget) { target in
+            ConsoleWindow(machineID: target.id)
+        }
+        .overlay {
+            if let message = model.busyMessage {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text(message).font(.callout)
+                }
+                .padding(24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+        }
         .alert(
             "PocketVM",
             isPresented: Binding(
@@ -75,6 +88,65 @@ struct RootView: View {
         } message: { message in
             Text(message)
         }
+        // Home Screen widgets and shortcuts open pocketvm://start?id=…
+        .onOpenURL { url in
+            if let id = MachineCatalog.machineID(from: url) {
+                router.request(id)
+            }
+        }
+        .onChange(of: router.pendingMachineID) { handlePendingLaunch() }
+        .onAppear { handlePendingLaunch() }
+    }
+
+    private func handlePendingLaunch() {
+        guard let id = router.pendingMachineID else { return }
+        router.pendingMachineID = nil
+        showingNewMachine = false
+        if model.consoleTarget != nil && model.consoleTarget?.id != id {
+            // Close the current window first, then open the requested one.
+            model.consoleTarget = nil
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                model.launch(id)
+            }
+        } else {
+            model.launch(id)
+        }
+    }
+}
+
+/// Picks the right console for the machine's engine.
+struct ConsoleWindow: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let machineID: UUID
+
+    var body: some View {
+        let name = model.machine(machineID)?.name ?? "Virtual Machine"
+        if let pc = model.pcSessions[machineID] {
+            PCConsoleView(session: pc, machineName: name)
+        } else if let session = model.sessions[machineID] {
+            ConsoleView(session: session, machineName: name)
+        } else {
+            ContentUnavailableView {
+                Label("Not Running", systemImage: "power")
+            } actions: {
+                Button("Close") { dismiss() }
+            }
+        }
+    }
+}
+
+struct MachineIcon: View {
+    let osType: GuestOSType
+    var size: CGFloat = 44
+
+    var body: some View {
+        Image(systemName: osType.symbolName)
+            .font(size > 50 ? .largeTitle : .title2)
+            .foregroundStyle(.white)
+            .frame(width: size, height: size)
+            .background(osType.accentColor.gradient, in: RoundedRectangle(cornerRadius: size * 0.23))
     }
 }
 
@@ -84,15 +156,10 @@ struct MachineRow: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: config.osType.symbolName)
-                .font(.title2)
-                .foregroundStyle(.white)
-                .frame(width: 44, height: 44)
-                .background(config.osType == .linuxRV32 ? Color.orange.gradient : Color.blue.gradient,
-                            in: RoundedRectangle(cornerRadius: 10))
+            MachineIcon(osType: config.osType)
             VStack(alignment: .leading, spacing: 2) {
                 Text(config.name).font(.headline)
-                StateLabel(state: state, hasSnapshots: !config.snapshots.isEmpty)
+                StateLabel(state: state, hasSnapshots: !config.snapshots.isEmpty, hasSavedState: config.hasSavedState)
             }
         }
         .padding(.vertical, 4)
@@ -102,6 +169,7 @@ struct MachineRow: View {
 struct StateLabel: View {
     let state: VMEngine.State
     var hasSnapshots = false
+    var hasSavedState = false
 
     var body: some View {
         Label(title, systemImage: symbol)
@@ -115,7 +183,9 @@ struct StateLabel: View {
         case .running: return "Running"
         case .paused: return "Paused"
         case .halted: return "Guru Meditation"
-        case .stopped, .poweredOff: return hasSnapshots ? "Powered Off (snapshots)" : "Powered Off"
+        case .stopped, .poweredOff:
+            if hasSavedState { return "Saved" }
+            return hasSnapshots ? "Powered Off (snapshots)" : "Powered Off"
         }
     }
 
@@ -124,7 +194,7 @@ struct StateLabel: View {
         case .running: return "play.circle.fill"
         case .paused: return "pause.circle.fill"
         case .halted: return "exclamationmark.triangle.fill"
-        case .stopped, .poweredOff: return "power.circle"
+        case .stopped, .poweredOff: return hasSavedState ? "square.and.arrow.down.fill" : "power.circle"
         }
     }
 
@@ -133,7 +203,7 @@ struct StateLabel: View {
         case .running: return .green
         case .paused: return .yellow
         case .halted: return .red
-        case .stopped, .poweredOff: return .secondary
+        case .stopped, .poweredOff: return hasSavedState ? .blue : .secondary
         }
     }
 }

@@ -79,9 +79,13 @@ public final class VMStore: @unchecked Sendable {
         copy.createdAt = Date()
         copy.lastRunAt = nil
         copy.snapshots = []
+        copy.hasSavedState = false
         try fileManager.createDirectory(at: directory(for: copy.id), withIntermediateDirectories: true)
-        if let kernel = kernelURL(for: config), let fileName = config.kernelFileName {
-            try fileManager.copyItem(at: kernel, to: directory(for: copy.id).appendingPathComponent(fileName))
+        for fileName in [config.kernelFileName, config.hardDiskFileName, config.floppyFileName].compactMap({ $0 }) {
+            let source = directory(for: config.id).appendingPathComponent(fileName)
+            if fileManager.fileExists(atPath: source.path) {
+                try fileManager.copyItem(at: source, to: directory(for: copy.id).appendingPathComponent(fileName))
+            }
         }
         try save(copy)
         return copy
@@ -159,6 +163,9 @@ public final class VMStore: @unchecked Sendable {
         if let problem = config.startProblem {
             throw VMError.invalidImage(problem)
         }
+        guard config.platform == .riscv else {
+            throw VMError.invalidImage("PC machines run in the PC engine, not the RISC-V interpreter")
+        }
         let machine = RV32Machine(ramSize: config.ramBytes)
         let loader: VMEngine.BootLoader
         switch config.osType {
@@ -173,6 +180,8 @@ public final class VMStore: @unchecked Sendable {
             let kernel = try Data(contentsOf: url, options: .mappedIfSafe)
             let args = config.bootArguments
             loader = { m in try m.bootLinux(kernel: kernel, bootArguments: args) }
+        default:
+            throw VMError.invalidImage("unsupported guest type for the RISC-V engine")
         }
         return VMEngine(machine: machine, bootLoader: loader)
     }

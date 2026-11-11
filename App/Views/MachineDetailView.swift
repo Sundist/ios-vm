@@ -1,14 +1,15 @@
 import SwiftUI
 import VMCore
 
-/// Details pane for one machine: summary, power controls and snapshots.
+/// Details pane for one machine: summary, power controls, storage,
+/// saved state / snapshots and Home Screen integration.
 struct MachineDetailView: View {
     @Environment(AppModel.self) private var model
     let machineID: UUID
 
-    @State private var showingConsole = false
     @State private var showingSettings = false
     @State private var showingSnapshotPrompt = false
+    @State private var showingHomeScreenGuide = false
     @State private var snapshotName = ""
     @State private var confirmDelete = false
 
@@ -18,24 +19,23 @@ struct MachineDetailView: View {
         }
     }
 
+    private func size(_ bytes: Int64?) -> String {
+        guard let bytes else { return "—" }
+        return ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)
+    }
+
     @ViewBuilder
     private func content(_ config: VMConfiguration) -> some View {
         let state = model.state(for: machineID)
-        let session = model.sessions[machineID]
 
         List {
             Section {
                 HStack(spacing: 16) {
-                    Image(systemName: config.osType.symbolName)
-                        .font(.largeTitle)
-                        .foregroundStyle(.white)
-                        .frame(width: 64, height: 64)
-                        .background(config.osType == .linuxRV32 ? Color.orange.gradient : Color.blue.gradient,
-                                    in: RoundedRectangle(cornerRadius: 14))
+                    MachineIcon(osType: config.osType, size: 64)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(config.name).font(.title2.bold())
                         Text(config.osType.displayName).font(.subheadline).foregroundStyle(.secondary)
-                        StateLabel(state: state, hasSnapshots: !config.snapshots.isEmpty)
+                        StateLabel(state: state, hasSnapshots: !config.snapshots.isEmpty, hasSavedState: config.hasSavedState)
                     }
                 }
                 .padding(.vertical, 6)
@@ -46,7 +46,7 @@ struct MachineDetailView: View {
                         .foregroundStyle(.red)
                 }
 
-                powerControls(config: config, state: state, session: session)
+                powerControls(config: config, state: state)
             }
 
             Section("General") {
@@ -59,18 +59,45 @@ struct MachineDetailView: View {
 
             Section("System") {
                 LabeledContent("Base Memory", value: "\(config.memoryMB) MB")
-                LabeledContent("Processors", value: "1 × RV32IMA")
-                LabeledContent("Acceleration", value: "Interpreter")
-                if let session, state.isActive {
-                    LabeledContent("Speed", value: session.mipsDescription)
+                if config.platform == .pc {
+                    LabeledContent("Processor", value: "1 × x86 (32-bit)")
+                    LabeledContent("Acceleration", value: "WebAssembly JIT (v86)")
+                    LabeledContent("Boot Order", value: config.bootDevice.displayName)
+                    LabeledContent("ACPI", value: config.acpiEnabled ? "On" : "Off")
+                    LabeledContent("Video Memory", value: "\(config.vgaMemoryMB) MB")
+                } else {
+                    LabeledContent("Processor", value: "1 × RV32IMA")
+                    LabeledContent("Acceleration", value: "Interpreter")
+                }
+                if state.isActive, let speed = model.speedDescription(for: machineID) {
+                    LabeledContent("Speed", value: speed)
                 }
             }
 
             Section("Storage") {
-                if config.osType.requiresKernel {
+                if config.platform == .pc {
+                    LabeledContent {
+                        Text(config.cdromName ?? "Empty").foregroundStyle(config.cdromName == nil ? .secondary : .primary)
+                    } label: {
+                        Label("CD/DVD", systemImage: "opticaldisc")
+                    }
+                    LabeledContent {
+                        Text(config.hardDiskFileName == nil ? "None" : size(config.hardDiskByteCount))
+                            .foregroundStyle(config.hardDiskFileName == nil ? .secondary : .primary)
+                    } label: {
+                        Label("Hard Disk", systemImage: "internaldrive")
+                    }
+                    if config.floppyFileName != nil {
+                        LabeledContent {
+                            Text(size(config.floppyByteCount))
+                        } label: {
+                            Label("Floppy", systemImage: "square.and.arrow.down.on.square")
+                        }
+                    }
+                } else if config.osType.requiresKernel {
                     LabeledContent("Kernel Image") {
-                        if let size = config.kernelByteCount {
-                            Text(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))
+                        if config.kernelByteCount != nil {
+                            Text(size(config.kernelByteCount))
                         } else {
                             Text("Not attached").foregroundStyle(.red)
                         }
@@ -84,53 +111,39 @@ struct MachineDetailView: View {
                 } else {
                     LabeledContent("Firmware", value: "Built-in monitor")
                 }
+                Button("Change Storage…") { showingSettings = true }
             }
 
-            Section("Serial Port") {
-                LabeledContent("Port 1", value: "16550A UART → Console")
+            if config.platform == .pc {
+                Section {
+                    if config.hasSavedState {
+                        LabeledContent("Saved State", value: size(model.store.savedStateSize(for: machineID)))
+                        Button("Discard Saved State", role: .destructive) {
+                            model.discardSavedState(of: machineID)
+                        }
+                        .disabled(state.isActive)
+                    } else {
+                        Text("Use “Save State and Close” in the machine window to continue later exactly where you left off.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } header: {
+                    Text("Saved State")
+                }
+            } else {
+                snapshotsSection(config: config, state: state)
             }
 
             Section {
-                if config.snapshots.isEmpty {
-                    Text(state.isActive
-                         ? "Take a snapshot to save the current machine state."
-                         : "Start the machine to take snapshots.")
-                        .foregroundStyle(.secondary)
-                }
-                ForEach(config.snapshots.sorted { $0.createdAt > $1.createdAt }) { snapshot in
-                    HStack {
-                        Image(systemName: "camera")
-                            .foregroundStyle(.tint)
-                        VStack(alignment: .leading) {
-                            Text(snapshot.name)
-                            Text("\(snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(ByteCountFormatter.string(fromByteCount: snapshot.byteCount, countStyle: .file))")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        Button("Restore") {
-                            if model.start(machineID, from: snapshot) != nil {
-                                showingConsole = true
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                    }
-                    .swipeActions {
-                        Button(role: .destructive) {
-                            model.deleteSnapshot(snapshot, of: machineID)
-                        } label: { Label("Delete", systemImage: "trash") }
-                    }
-                }
-                if state.isActive {
-                    Button {
-                        snapshotName = "Snapshot \(config.snapshots.count + 1)"
-                        showingSnapshotPrompt = true
-                    } label: {
-                        Label("Take Snapshot", systemImage: "camera.badge.ellipsis")
-                    }
+                Button {
+                    showingHomeScreenGuide = true
+                } label: {
+                    Label("Add to Home Screen…", systemImage: "apps.iphone.badge.plus")
                 }
             } header: {
-                Text("Snapshots")
+                Text("Home Screen")
+            } footer: {
+                Text("Start this machine like an app, straight from the Home Screen.")
             }
 
             if !config.notes.isEmpty {
@@ -163,10 +176,8 @@ struct MachineDetailView: View {
         .sheet(isPresented: $showingSettings) {
             MachineSettingsView(config: config, isRunning: state.isActive)
         }
-        .fullScreenCover(isPresented: $showingConsole) {
-            if let session = model.sessions[machineID] {
-                ConsoleView(session: session, machineName: config.name)
-            }
+        .sheet(isPresented: $showingHomeScreenGuide) {
+            HomeScreenGuideView(config: config)
         }
         .alert("Take Snapshot", isPresented: $showingSnapshotPrompt) {
             TextField("Name", text: $snapshotName)
@@ -183,31 +194,75 @@ struct MachineDetailView: View {
                 model.delete(machineID)
             }
         } message: {
-            Text("The kernel image and all snapshots stored for this machine will be removed.")
+            Text("The hard disk, kernel image, saved state and snapshots stored for this machine will be removed. Attached ISO files are not deleted.")
         }
     }
 
     @ViewBuilder
-    private func powerControls(config: VMConfiguration, state: VMEngine.State, session: VMSession?) -> some View {
-        if state.isActive, let session {
+    private func snapshotsSection(config: VMConfiguration, state: VMEngine.State) -> some View {
+        Section {
+            if config.snapshots.isEmpty {
+                Text(state.isActive
+                     ? "Take a snapshot to save the current machine state."
+                     : "Start the machine to take snapshots.")
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(config.snapshots.sorted { $0.createdAt > $1.createdAt }) { snapshot in
+                HStack {
+                    Image(systemName: "camera")
+                        .foregroundStyle(.tint)
+                    VStack(alignment: .leading) {
+                        Text(snapshot.name)
+                        Text("\(snapshot.createdAt.formatted(date: .abbreviated, time: .shortened)) · \(size(snapshot.byteCount))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Restore") {
+                        model.start(machineID, from: snapshot)
+                    }
+                    .buttonStyle(.bordered)
+                }
+                .swipeActions {
+                    Button(role: .destructive) {
+                        model.deleteSnapshot(snapshot, of: machineID)
+                    } label: { Label("Delete", systemImage: "trash") }
+                }
+            }
+            if state.isActive {
+                Button {
+                    snapshotName = "Snapshot \(config.snapshots.count + 1)"
+                    showingSnapshotPrompt = true
+                } label: {
+                    Label("Take Snapshot", systemImage: "camera.badge.ellipsis")
+                }
+            }
+        } header: {
+            Text("Snapshots")
+        }
+    }
+
+    @ViewBuilder
+    private func powerControls(config: VMConfiguration, state: VMEngine.State) -> some View {
+        if state.isActive {
             Button {
-                showingConsole = true
+                model.consoleTarget = ConsoleTarget(id: machineID)
             } label: {
-                Label("Show Console", systemImage: "terminal.fill")
+                Label("Show Machine Window", systemImage: config.platform == .pc ? "display" : "terminal.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
 
             HStack {
                 if state == .running {
-                    Button { session.pause() } label: { Label("Pause", systemImage: "pause.fill") }
+                    Button { model.pause(machineID) } label: { Label("Pause", systemImage: "pause.fill") }
                 } else {
-                    Button { session.resume() } label: { Label("Resume", systemImage: "play.fill") }
+                    Button { model.resume(machineID) } label: { Label("Resume", systemImage: "play.fill") }
                 }
                 Spacer()
-                Button { session.reset() } label: { Label("Reset", systemImage: "arrow.counterclockwise") }
+                Button { model.reset(machineID) } label: { Label("Reset", systemImage: "arrow.counterclockwise") }
                 Spacer()
-                Button(role: .destructive) { session.powerOff() } label: { Label("Power Off", systemImage: "power") }
+                Button(role: .destructive) { model.powerOff(machineID) } label: { Label("Power Off", systemImage: "power") }
             }
             .buttonStyle(.bordered)
         } else {
@@ -217,11 +272,9 @@ struct MachineDetailView: View {
                     .foregroundStyle(.orange)
             }
             Button {
-                if model.start(machineID) != nil {
-                    showingConsole = true
-                }
+                model.launch(machineID)
             } label: {
-                Label("Start", systemImage: "play.fill")
+                Label(config.hasSavedState ? "Continue (Saved State)" : "Start", systemImage: "play.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)

@@ -153,3 +153,96 @@ final class VMStoreTests: XCTestCase {
         XCTAssertTrue(config.snapshots.isEmpty)
     }
 }
+
+final class PCConfigurationTests: XCTestCase {
+    private var root: URL!
+
+    override func setUpWithError() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    }
+
+    override func tearDownWithError() throws {
+        try? FileManager.default.removeItem(at: root)
+    }
+
+    func testDecodesConfigurationsFromTheFirstVersion() throws {
+        let json = """
+        {"id":"7C9A1D2E-1111-4222-8333-944455556666","name":"Old","osType":"builtInMonitor",
+         "memoryMB":8,"bootArguments":"","notes":"","createdAt":"2026-11-11T06:00:00Z","snapshots":[]}
+        """
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let config = try decoder.decode(VMConfiguration.self, from: Data(json.utf8))
+        XCTAssertEqual(config.name, "Old")
+        XCTAssertEqual(config.osType, .builtInMonitor)
+        XCTAssertFalse(config.hasSavedState)
+        XCTAssertEqual(config.bootDevice, .automatic)
+        XCTAssertNil(config.hardDiskFileName)
+    }
+
+    func testPCMachineNeedsBootMedia() throws {
+        let store = try VMStore(rootURL: root)
+        var config = VMConfiguration(name: "XP", osType: .windowsNT)
+        XCTAssertEqual(config.platform, .pc)
+        XCTAssertEqual(config.memoryMB, 512)
+        XCTAssertFalse(config.acpiEnabled)
+        XCTAssertNotNil(config.startProblem)
+
+        try store.createHardDisk(sizeGB: 1, into: &config)
+        XCTAssertNil(config.startProblem)
+        XCTAssertEqual(config.hardDiskByteCount, 1 << 30)
+        let attributes = try FileManager.default.attributesOfItem(atPath: store.hardDiskURL(for: config)!.path)
+        XCTAssertEqual((attributes[.size] as? NSNumber)?.int64Value, 1 << 30)
+
+        let iso = root.appendingPathComponent("install.iso")
+        try Data(repeating: 0x41, count: 4096).write(to: iso)
+        try store.attachCDROM(from: iso, into: &config)
+        XCTAssertEqual(config.cdromName, "install.iso")
+        let resolved = try store.resolveCDROM(for: &config)
+        XCTAssertEqual(resolved?.standardizedFileURL.path, iso.standardizedFileURL.path)
+
+        config.bootDevice = .cdrom
+        let plan = try store.makePCBootPlan(for: config, cdromURL: resolved, restoreState: true)
+        XCTAssertFalse(plan.restoreState)                 // no saved state yet
+        let page = plan.pageConfiguration()
+        XCTAssertEqual(page["memoryMB"] as? Int, 512)
+        XCTAssertEqual(page["bootOrder"] as? Int, 0x123)
+        XCTAssertEqual((page["cdrom"] as? [String: Any])?["size"] as? Int64, 4096)
+        XCTAssertEqual((page["hda"] as? [String: Any])?["size"] as? Int64, 1 << 30)
+        XCTAssertNoThrow(try plan.pageConfigurationJSON())
+
+        // Saved state lifecycle.
+        let tmp = root.appendingPathComponent("state.tmp")
+        try Data([1, 2, 3]).write(to: tmp)
+        try store.commitSavedState(from: tmp, into: &config)
+        XCTAssertTrue(config.hasSavedState)
+        XCTAssertTrue(try store.makePCBootPlan(for: config, cdromURL: resolved, restoreState: true).restoreState)
+        try store.discardSavedState(of: &config)
+        XCTAssertFalse(config.hasSavedState)
+
+        // Clone copies the disk but not the saved state.
+        let copy = try store.clone(config, name: "XP 2")
+        XCTAssertNotNil(store.hardDiskURL(for: copy))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.hardDiskURL(for: copy)!.path))
+    }
+
+    func testRawDiskImportValidatesSize() throws {
+        let store = try VMStore(rootURL: root)
+        var config = VMConfiguration(name: "DOS", osType: .dosX86)
+        try store.save(config)
+        let bad = root.appendingPathComponent("bad.img")
+        try Data(count: 1000).write(to: bad)
+        XCTAssertThrowsError(try store.importHardDisk(from: bad, into: &config))
+        let good = root.appendingPathComponent("good.img")
+        try Data(count: 2048).write(to: good)
+        try store.importHardDisk(from: good, into: &config)
+        XCTAssertEqual(config.hardDiskByteCount, 2048)
+    }
+
+    func testStartURLRoundTrip() {
+        let id = UUID()
+        XCTAssertEqual(MachineCatalog.machineID(from: MachineCatalog.startURL(for: id)), id)
+        XCTAssertEqual(MachineCatalog.machineID(from: URL(string: "pocketvm://start/\(id.uuidString)")!), id)
+        XCTAssertNil(MachineCatalog.machineID(from: URL(string: "https://example.com/start?id=\(id.uuidString)")!))
+    }
+}

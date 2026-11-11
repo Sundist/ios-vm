@@ -37,6 +37,42 @@ geri yükleyebilir, misafir sistemi de tam ekran seri konsoldan kullanabilirsini
 - Makineler `Documents/Machines/` altında tutulur ve Dosyalar (Files) uygulamasından
   görülebilir.
 
+## Windows ve ISO çalıştırma (x86 PC)
+
+PC makineleri, açık kaynak x86 emülatörü [v86](https://github.com/copy/v86) ile çalışır
+(BSD-2, sürüm 0.5.471, `App/PCWeb` içinde). v86, x86 kodunu WebAssembly'ye çevirir. iOS'ta
+JIT yalnızca WebKit'e izinli olduğu için v86 bir `WKWebView` içinde çalışır ve yorumlayıcıdan
+çok daha hızlıdır.
+
+- **Desteklenenler:** 32-bit x86 sistemler. Windows 95/98/ME, Windows 2000/XP,
+  Windows Vista/7 32-bit (deneysel ve çok yavaş), 32-bit Linux ISO'ları, FreeDOS, KolibriOS,
+  ReactOS…
+- **Desteklenmeyenler:** 64-bit sistemler. **Windows 10/11 64-bit çalışmaz.**
+- **CD/DVD:** ISO dosyası olduğu yerden (Dosyalar, iCloud, iPhone'umda) okunur, kopyalanmaz.
+- **Sabit disk:** boş disk oluşturulabilir veya mevcut bir raw `.img` eklenebilir. Misafirin
+  diske yazdıkları anında iPhone'daki disk dosyasına kaydedilir.
+- **Save State:** makineyi kaldığı yerden devam ettirmek için RAM ve CPU durumu kaydedilir.
+- **Kontroller:** dokunmatik trackpad (dokun = tık, iki parmak = sağ tık, iki parmakla
+  kaydırma). Ekran klavyesi ⌨︎ ile açılır. Tuş çubuğunda Ctrl+Alt+Del, F1–F12, Esc, Win ve
+  ok tuşları var. Donanım klavyesi de çalışır.
+- **Windows XP kurulumu:** 512 MB RAM, 4 GB disk, ACPI kapalı. Kurulum başında F5'e basıp
+  "Standard PC" seçin.
+
+## Ana ekrana ekleme
+
+Her sanal makine ana ekrana iki şekilde eklenebilir (uygulamada **Add to Home Screen…**
+adım adım gösterir):
+
+1. **Uygulama simgesi:** Kestirmeler (Shortcuts) uygulamasında *Start Virtual Machine*
+   eylemini seçip makineyi belirleyin, ardından *Ana Ekrana Ekle* deyin. İsim ve simgeyi siz
+   seçersiniz; simge ayrı bir uygulama gibi görünür. Siri'ye "Start ‹ad› in PocketVM" de
+   diyebilirsiniz.
+2. **Widget:** *PocketVM › Virtual Machine* widget'ını ekleyip düzenleyerek makineyi seçin.
+
+Her ikisi de `pocketvm://start?id=<uuid>` bağlantısıyla uygulamayı açar ve makineyi başlatır.
+Widget ile uygulama aynı App Group'u kullanır. İmzalamadan önce `project.yml` dosyasındaki
+`APP_BUNDLE_ID` ve `APP_GROUP_ID` değerlerini kendi kimliklerinizle değiştirin.
+
 ## Proje yapısı
 
 ```
@@ -56,6 +92,12 @@ App/                       SwiftUI iOS uygulaması
   AppModel.swift, VMSession.swift
   Views/                   RootView, MachineDetailView, NewMachineView,
                            MachineSettingsView, ConsoleView, TerminalInputView
+App/PC/                    x86 PC motoru (WKWebView + v86, disk/durum köprüsü)
+App/PCWeb/                 v86, BIOS'lar ve sayfa betikleri (pvm.js, pvm-disk.js)
+App/Intents/, Shared/      App Intents (Kestirmeler / Siri)
+Widget/                    Ana ekran widget'ı
+tests/pcweb/               Disk köprüsü testleri (Node.js)
+scripts/fetch-v86.sh       v86 ve BIOS'ları sabit sürümden indirir
 project.yml                XcodeGen proje tanımı
 ```
 
@@ -99,7 +141,7 @@ Varsayılan önyükleme argümanları:
 
 ## Yol haritası
 
-- QEMU (TCG/TCI) tabanlı ikinci bir motorla x86_64 ve ARM64 misafirler (UTM SE yaklaşımı)
+- QEMU (TCG/TCI) tabanlı bir motorla x86_64 ve ARM64 misafirler (64-bit Windows için gerekli)
 - virtio-blk ile disk imajları (`.img`, `.qcow2`) ve paylaşılan klasörler
 - virtio-gpu / framebuffer ile grafik ekran
 - virtio-net ile ağ (NAT)

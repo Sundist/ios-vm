@@ -4,6 +4,14 @@ options:
   deploymentTarget:
     iOS: "17.0"
   createIntermediateGroups: true
+settings:
+  base:
+    # Change these two to your own identifiers before signing.
+    APP_BUNDLE_ID: com.example.pocketvm
+    APP_GROUP_ID: group.com.example.pocketvm
+    MARKETING_VERSION: "1.1"
+    CURRENT_PROJECT_VERSION: "2"
+    SWIFT_VERSION: "5.0"
 packages:
   VMCore:
     path: VMCore
@@ -13,19 +21,31 @@ targets:
     platform: iOS
     sources:
       - path: App
+        excludes:
+          - "PCWeb/**"
+      - path: App/PCWeb
+        type: folder
+        buildPhase: resources
+      - path: Shared
     dependencies:
       - package: VMCore
+      - target: PocketVMWidget
     info:
       path: App/Info.plist
       properties:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
+        PVMAppGroup: $(APP_GROUP_ID)
+        CFBundleURLTypes:
+          - CFBundleURLName: $(APP_BUNDLE_ID)
+            CFBundleURLSchemes: [pocketvm]
+    entitlements:
+      path: App/PocketVM.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP_ID)]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.example.pocketvm
-        MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "1"
-        SWIFT_VERSION: "5.0"
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID)
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: PocketVM
@@ -36,11 +56,42 @@ targets:
       configs:
         Release:
           SWIFT_OPTIMIZATION_LEVEL: "-O"
+
+  PocketVMWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+      - path: Shared
+    dependencies:
+      - package: VMCore
+      - sdk: WidgetKit.framework
+      - sdk: SwiftUI.framework
+    info:
+      path: Widget/Info.plist
+      properties:
+        CFBundleDisplayName: PocketVM
+        PVMAppGroup: $(APP_GROUP_ID)
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    entitlements:
+      path: Widget/PocketVMWidget.entitlements
+      properties:
+        com.apple.security.application-groups: [$(APP_GROUP_ID)]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: $(APP_BUNDLE_ID).widget
+        TARGETED_DEVICE_FAMILY: "1,2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: PocketVM
+        SKIP_INSTALL: YES
+
 schemes:
   PocketVM:
     build:
       targets:
         PocketVM: all
+        PocketVMWidget: all
     run:
       config: Debug
     archive:

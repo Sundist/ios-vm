@@ -7,12 +7,20 @@ struct NewMachineView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
 
-    @State private var name = ""
-    @State private var osType: GuestOSType = .linuxRV32
-    @State private var memoryMB = GuestOSType.linuxRV32.defaultMemoryMB
-    @State private var bootArguments = GuestOSType.linuxRV32.defaultBootArguments
+    @State private var name = GuestOSType.windowsNT.shortName
+    @State private var osType: GuestOSType = .windowsNT
+    @State private var memoryMB = GuestOSType.windowsNT.defaultMemoryMB
+    @State private var createDisk = true
+    @State private var diskSizeGB = GuestOSType.windowsNT.defaultDiskGB
+    @State private var bootArguments = ""
+    @State private var cdromURL: URL?
     @State private var kernelURL: URL?
-    @State private var showingImporter = false
+    @State private var importer: ImporterKind?
+
+    private enum ImporterKind: Identifiable {
+        case cdrom, kernel
+        var id: Self { self }
+    }
 
     var body: some View {
         NavigationStack {
@@ -21,28 +29,61 @@ struct NewMachineView: View {
                     TextField("Name", text: $name)
                         .textInputAutocapitalization(.words)
                     Picker("Type", selection: $osType) {
-                        ForEach(GuestOSType.allCases) { type in
-                            Label(type.displayName, systemImage: type.symbolName).tag(type)
+                        Section("PC (x86)") {
+                            ForEach(GuestOSType.pcTypes) { type in
+                                Label(type.displayName, systemImage: type.symbolName).tag(type)
+                            }
+                        }
+                        Section("RISC-V") {
+                            ForEach(GuestOSType.riscvTypes) { type in
+                                Label(type.displayName, systemImage: type.symbolName).tag(type)
+                            }
                         }
                     }
                 } header: {
                     Text("Name and Operating System")
                 } footer: {
-                    Text(osDescription)
+                    Text(osType.setupHint)
                 }
 
                 Section {
-                    MemoryPicker(memoryMB: $memoryMB)
+                    MemoryPicker(memoryMB: $memoryMB, platform: osType.platform)
                 } header: {
                     Text("Hardware")
                 } footer: {
-                    Text("Guest RAM is allocated from the iPhone's memory while the machine runs.")
+                    Text("Guest RAM comes out of the iPhone's memory while the machine runs. If iOS stops the machine, use less.")
                 }
 
-                if osType.requiresKernel {
+                if osType.platform == .pc {
                     Section {
                         Button {
-                            showingImporter = true
+                            importer = .cdrom
+                        } label: {
+                            LabeledContent {
+                                Text(cdromURL?.lastPathComponent ?? "Choose ISO…")
+                                    .foregroundStyle(cdromURL == nil ? Color.accentColor : .secondary)
+                                    .lineLimit(1)
+                            } label: {
+                                Label("CD/DVD", systemImage: "opticaldisc")
+                            }
+                        }
+                        Toggle(isOn: $createDisk) {
+                            Label("Create a hard disk", systemImage: "internaldrive")
+                        }
+                        if createDisk {
+                            Stepper(value: $diskSizeGB, in: 1...64) {
+                                LabeledContent("Size", value: "\(diskSizeGB) GB")
+                            }
+                        }
+                    } header: {
+                        Text("Storage")
+                    } footer: {
+                        Text("The ISO stays where it is (Files, On My iPhone…) and is not copied. The hard disk grows as data is written; existing raw disk images and floppies can be attached in Settings.")
+                    }
+                } else if osType.requiresKernel {
+                    Section {
+                        Button {
+                            importer = .kernel
                         } label: {
                             LabeledContent("Kernel Image") {
                                 Text(kernelURL?.lastPathComponent ?? "Choose…")
@@ -56,7 +97,7 @@ struct NewMachineView: View {
                     } header: {
                         Text("Storage")
                     } footer: {
-                        Text("A flat binary RV32 no-MMU Linux kernel (Image) with a built-in initramfs, such as the images built for mini-rv32ima. You can also attach it later.")
+                        Text("A flat binary RV32 no-MMU Linux kernel (Image) with a built-in initramfs, such as the images built for mini-rv32ima.")
                     }
                 }
             }
@@ -71,30 +112,27 @@ struct NewMachineView: View {
                         .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .onChange(of: osType) { _, newValue in
+            .onChange(of: osType) { oldValue, newValue in
                 memoryMB = newValue.defaultMemoryMB
+                diskSizeGB = max(newValue.defaultDiskGB, 1)
+                createDisk = newValue.defaultDiskGB > 0
                 bootArguments = newValue.defaultBootArguments
-                if name.isEmpty || GuestOSType.allCases.map(\.shortName).contains(name) {
+                if name.isEmpty || name == oldValue.shortName {
                     name = newValue.shortName
                 }
             }
-            .onAppear {
-                if name.isEmpty { name = osType.shortName }
-            }
-            .fileImporter(isPresented: $showingImporter, allowedContentTypes: [.data, .item]) { result in
-                if case let .success(url) = result {
-                    kernelURL = url
+            .fileImporter(
+                isPresented: Binding(get: { importer != nil }, set: { if !$0 { importer = nil } }),
+                allowedContentTypes: importer == .cdrom ? [.diskImage, .data, .item] : [.data, .item]
+            ) { result in
+                guard case let .success(url) = result else { return }
+                switch importer {
+                case .cdrom: cdromURL = url
+                case .kernel: kernelURL = url
+                case nil: break
                 }
+                importer = nil
             }
-        }
-    }
-
-    private var osDescription: String {
-        switch osType {
-        case .builtInMonitor:
-            return "A tiny built-in firmware with an echo console. Useful to try the app without any files."
-        case .linuxRV32:
-            return "Boots a 32-bit RISC-V Linux kernel on an emulated CPU with a 16550 serial console."
         }
     }
 
@@ -104,7 +142,15 @@ struct NewMachineView: View {
             osType: osType,
             memoryMB: memoryMB)
         config.bootArguments = osType.requiresKernel ? bootArguments : ""
-        if model.create(config, kernel: osType.requiresKernel ? kernelURL : nil) != nil {
+        if osType.platform == .pc {
+            config.bootDevice = cdromURL != nil ? .cdrom : .automatic
+        }
+        let created = model.create(
+            config,
+            kernel: osType.requiresKernel ? kernelURL : nil,
+            cdrom: osType.platform == .pc ? cdromURL : nil,
+            diskSizeGB: osType.platform == .pc && createDisk ? diskSizeGB : 0)
+        if created != nil {
             dismiss()
         }
     }
@@ -113,31 +159,41 @@ struct NewMachineView: View {
 /// Memory slider with VirtualBox-style power-of-two presets.
 struct MemoryPicker: View {
     @Binding var memoryMB: Int
+    var platform: MachinePlatform = .riscv
     var isDisabled = false
 
-    private static let presets = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    private var presets: [Int] {
+        platform == .pc
+            ? [16, 32, 64, 128, 256, 512, 768, 1024, 1536, 2048]
+            : [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    }
 
     var body: some View {
         VStack(alignment: .leading) {
             LabeledContent("Base Memory", value: "\(memoryMB) MB")
             Slider(
                 value: Binding(
-                    get: { Double(Self.presets.firstIndex(of: memoryMB) ?? Self.nearestIndex(memoryMB)) },
-                    set: { memoryMB = Self.presets[Int($0.rounded())] }),
-                in: 0...Double(Self.presets.count - 1),
+                    get: { Double(presets.firstIndex(of: memoryMB) ?? nearestIndex(memoryMB)) },
+                    set: { memoryMB = presets[min(max(Int($0.rounded()), 0), presets.count - 1)] }),
+                in: 0...Double(presets.count - 1),
                 step: 1
             ) {
                 Text("Base Memory")
             } minimumValueLabel: {
-                Text("1 MB").font(.caption2)
+                Text("\(presets.first!) MB").font(.caption2)
             } maximumValueLabel: {
-                Text("512 MB").font(.caption2)
+                Text(presets.last! >= 1024 ? "\(presets.last! / 1024) GB" : "\(presets.last!) MB").font(.caption2)
             }
             .disabled(isDisabled)
+            if platform == .pc && memoryMB > 1024 {
+                Text("More than 1 GB may be stopped by iOS on devices with less memory.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
         }
     }
 
-    private static func nearestIndex(_ value: Int) -> Int {
+    private func nearestIndex(_ value: Int) -> Int {
         presets.indices.min { abs(presets[$0] - value) < abs(presets[$1] - value) } ?? 0
     }
 }

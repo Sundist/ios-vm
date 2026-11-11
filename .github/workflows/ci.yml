@@ -5,6 +5,20 @@ on:
   pull_request:
 
 jobs:
+  pc-web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: NativeDisk unit tests
+        run: node tests/pcweb/native-disk-unit.js
+      - name: v86 boot + disk persistence test
+        run: node tests/pcweb/disk-test.js
+      - name: Check page scripts
+        run: node --check App/PCWeb/pvm.js && node --check App/PCWeb/pvm-disk.js
+
   build-and-test:
     runs-on: macos-15
     steps:
@@ -18,7 +32,7 @@ jobs:
           brew install xcodegen
           xcodegen generate
 
-      - name: Build iOS app (simulator)
+      - name: Build iOS app + widget (simulator)
         run: |
           xcodebuild \
             -project PocketVM.xcodeproj \

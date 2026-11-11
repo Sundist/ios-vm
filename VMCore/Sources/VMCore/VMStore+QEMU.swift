@@ -89,6 +89,7 @@ extension VMStore {
             answerDisk: answerDisk, efiVariables: vars, vncSocket: vnc, qmpSocket: qmp)
         builder.splitWX = splitWX
         builder.relativeSocketPaths = relativeSocketPaths
+        builder.efiVariablesFormat = QEMUArgumentBuilder.detectImageFormat(vars)
         builder.translationBlockCacheMB = config.memoryMB >= 4096 ? 256 : 128
 
         return QEMULaunchPlan(

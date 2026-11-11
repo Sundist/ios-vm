@@ -85,7 +85,7 @@ final class QEMUArgumentTests: XCTestCase {
         // Relative socket names keep long container paths under the 104-byte limit.
         XCTAssertEqual(value(after: "-vnc", in: args), ["unix:\(plan.vncSocket.lastPathComponent)"])
         XCTAssertTrue(value(after: "-qmp", in: args)[0].hasPrefix("unix:\(plan.qmpSocket.lastPathComponent),"))
-        XCTAssertEqual(plan.socketDirectory, root.appendingPathComponent("s"))
+        XCTAssertEqual(plan.socketDirectory.standardizedFileURL.path, root.appendingPathComponent("s").standardizedFileURL.path)
     }
 
     func testMissingFirmwareIsReported() throws {
@@ -95,6 +95,22 @@ final class QEMUArgumentTests: XCTestCase {
         XCTAssertThrowsError(try store.makeQEMULaunchPlan(
             for: &config, resourceDirectory: root.appendingPathComponent("nothing"),
             socketDirectory: root.appendingPathComponent("s")))
+    }
+
+    func testQcow2VariableTemplatesAreDetected() throws {
+        // UTM's iOS sysroot ships edk2 variable templates as qcow2.
+        var qcow2 = Data([0x51, 0x46, 0x49, 0xfb, 0, 0, 0, 3])
+        qcow2.append(Data(count: 1024))
+        try qcow2.write(to: resources.appendingPathComponent("edk2-arm-vars.fd"))
+        let store = try VMStore(rootURL: root.appendingPathComponent("Machines"))
+        var config = VMConfiguration(name: "L", osType: .linuxARM64)
+        try store.createHardDisk(sizeGB: 1, into: &config)
+        let plan = try store.makeQEMULaunchPlan(for: &config, resourceDirectory: resources,
+                                                socketDirectory: root.appendingPathComponent("s"))
+        let drives = value(after: "-drive", in: plan.arguments)
+        XCTAssertTrue(drives.contains { $0.hasPrefix("if=pflash,format=qcow2,unit=1,") }, "\(drives)")
+        XCTAssertTrue(drives.contains { $0.hasPrefix("if=pflash,format=raw,unit=0,") })
+        XCTAssertEqual(QEMUArgumentBuilder.detectImageFormat(resources.appendingPathComponent("edk2-aarch64-code.fd")), "raw")
     }
 
     func testCommasInPathsAreEscaped() {

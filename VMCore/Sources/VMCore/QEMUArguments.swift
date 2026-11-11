@@ -40,6 +40,9 @@ public struct QEMUArgumentBuilder {
     /// Pass socket file names only (QEMU runs with the socket directory as
     /// its working directory). Off for tests that run QEMU as a process.
     public var relativeSocketPaths = false
+    /// Image format of the UEFI variable store. UTM's iOS build ships the
+    /// templates as qcow2, upstream QEMU as 64 MB raw files.
+    public var efiVariablesFormat = "raw"
 
     public init(config: VMConfiguration, resourceDirectory: URL, hardDisk: URL?, cdrom: URL?, answerDisk: URL?,
                 efiVariables: URL, vncSocket: URL, qmpSocket: URL) {
@@ -63,6 +66,14 @@ public struct QEMUArgumentBuilder {
         case .aarch64: return ("edk2-aarch64-code.fd", "edk2-arm-vars.fd")
         case .x86_64: return ("edk2-x86_64-code.fd", "edk2-i386-vars.fd")
         }
+    }
+
+    /// "qcow2" if the file starts with the qcow2 magic, otherwise "raw".
+    public static func detectImageFormat(_ url: URL) -> String {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return "raw" }
+        defer { try? handle.close() }
+        let magic = (try? handle.read(upToCount: 4)) ?? Data()
+        return magic == Data([0x51, 0x46, 0x49, 0xfb]) ? "qcow2" : "raw"
     }
 
     /// Escapes a value for QEMU's comma-separated option syntax.
@@ -105,7 +116,7 @@ public struct QEMUArgumentBuilder {
         // UEFI firmware + per-machine variable store.
         args += [
             "-drive", "if=pflash,format=raw,unit=0,file.filename=\(Self.escape(code)),file.locking=off,readonly=on",
-            "-drive", "if=pflash,format=raw,unit=1,file.filename=\(Self.escape(efiVariables.path)),file.locking=off",
+            "-drive", "if=pflash,format=\(efiVariablesFormat),unit=1,file.filename=\(Self.escape(efiVariables.path)),file.locking=off",
         ]
 
         // Display, USB input (tablet = absolute pointer, ideal for touch).
